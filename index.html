@@ -199,7 +199,26 @@
   .edge-ends span.node { background: #eef0f6; border-radius: 6px; padding: 2px 8px; max-width: 100%; overflow-wrap: anywhere; }
   .edge-preview { display: flex; align-items: center; gap: 10px; margin: -4px 0 8px; font-weight: 600; font-size: 12.5px; }
 
+  .hint { margin: 2px 0 8px; font-size: 11.5px; color: var(--muted); }
+  .hint-line { display: block; margin: -6px 0 10px; font-size: 11.5px; color: var(--muted); }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  /* Required permanent unlocks (node sidebar) */
+  .req-list { max-height: 150px; overflow: auto; border: 1px solid #cdd3e0; border-radius: 8px; padding: 4px; background: #fff; }
+  .req-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 6px; cursor: pointer; }
+  .req-row:hover { background: #f3f5fa; }
+  .req-row input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: #cf3a2f; }
+  .req-row .loc { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .req-empty { padding: 6px 8px; color: var(--muted); font-size: 12px; }
+
   /* ---------- simulation panel ---------- */
+  .actpick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .actpick label { position: relative; cursor: pointer; }
+  .actpick input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .actpick span { display: flex; align-items: center; justify-content: center; gap: 6px; height: 38px; border-radius: 9px;
+    border: 1.5px solid var(--line); background: #fff; font-weight: 700; font-size: 13px; }
+  .actpick input:checked + span { background: var(--c); border-color: transparent; color: #fff; box-shadow: 0 2px 8px rgba(16, 24, 40, .2); }
+  .actpick input:focus-visible + span { outline: 3px solid rgba(79, 70, 229, .35); outline-offset: 1px; }
   .sim-block { margin-bottom: 20px; }
   .sim-block > .group-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
   .clock { display: flex; align-items: baseline; gap: 8px; margin: 6px 0 4px; }
@@ -290,6 +309,7 @@
       <div class="menu" id="arrange-menu" role="menu" hidden>
         <button type="button" role="menuitem" data-arrange="flow"><strong>Tidy up</strong><span>Flow left → right from Start, one column band per Act</span></button>
         <button type="button" role="menuitem" data-arrange="location"><strong>Group by Location</strong><span>One region per location, each with its own tree inside</span></button>
+        <button type="button" role="menuitem" data-arrange="act"><strong>Group by Act</strong><span>One region per Act, with each location's nodes side by side inside</span></button>
       </div>
     </div>
     <span class="sep" aria-hidden="true"></span>
@@ -310,6 +330,12 @@
   <!-- LEFT: simulation controls -->
   <aside class="panel left" id="sim-panel" aria-label="Simulation controls" hidden>
     <section class="sim-block">
+      <h2>Player is in</h2>
+      <div class="actpick" id="act-pick" role="radiogroup" aria-label="Act the player is in"></div>
+      <p class="hint">An Act is a requirement: nodes of a later Act stay locked until the player gets there. “Any” nodes need none.</p>
+    </section>
+
+    <section class="sim-block">
       <h2>Time Passed in Loop</h2>
       <div class="clock"><output id="sim-time-out" for="sim-time">0:00</output><span>/ 7:00</span></div>
       <input type="range" id="sim-time" min="0" max="420" step="1" value="0" aria-label="Time passed in loop">
@@ -319,17 +345,29 @@
     <section class="sim-block">
       <div class="group-head"><h2>Knowledge</h2>
         <span class="group-actions"><button class="btn small" data-group="Knowledge Gain" data-all="1">All</button><button class="btn small" data-group="Knowledge Gain" data-all="0">None</button></span></div>
+      <p class="hint">Kept between loops. Met through Knowledge Prerequisite arrows.</p>
       <ul class="checklist" id="list-knowledge"></ul>
     </section>
 
     <section class="sim-block">
       <div class="group-head"><h2>Permanent Unlocks</h2>
         <span class="group-actions"><button class="btn small" data-group="Permanent Unlock" data-all="1">All</button><button class="btn small" data-group="Permanent Unlock" data-all="0">None</button></span></div>
+      <p class="hint">Kept between loops. Nodes list the ones they require; no arrows.</p>
       <ul class="checklist" id="list-unlocks"></ul>
     </section>
 
+    <section class="sim-block">
+      <div class="group-head"><h2>Done this loop</h2>
+        <span class="group-actions"><button class="btn small" data-group="loop" data-all="1">All</button><button class="btn small" data-group="loop" data-all="0">None</button></span></div>
+      <p class="hint">Sources of Mechanical Prerequisite arrows. Cleared when a new loop starts.</p>
+      <ul class="checklist" id="list-loop"></ul>
+    </section>
+
     <div class="summary" id="sim-summary" aria-live="polite"></div>
-    <button class="btn" id="sim-reset">Reset simulation</button>
+    <div class="btn-row">
+      <button class="btn" id="sim-new-loop" title="Back to 0:00 and clear “Done this loop”. Act, knowledge and unlocks are kept.">Start new loop</button>
+      <button class="btn" id="sim-reset" title="Act 1, 0:00, everything unticked">Reset simulation</button>
+    </div>
   </aside>
 
   <!-- CENTRE: graph canvas -->
@@ -366,6 +404,8 @@
         <label class="field"><span>Type</span><select id="f-type"></select></label>
         <label class="field"><span>Act</span><select id="f-act"></select></label>
       </div>
+      <small class="hint-line" id="f-type-hint"></small>
+      <small class="hint-line" id="f-act-hint">Act is a requirement: the player must have reached it in Simulation Mode. “Any” = none.</small>
       <label class="field"><span>Location</span>
         <input type="text" id="f-loc" list="loc-list" maxlength="60" placeholder="e.g. Boarding House" aria-describedby="f-loc-hint">
         <datalist id="loc-list"></datalist>
@@ -375,6 +415,11 @@
         <input type="text" id="f-time" inputmode="numeric" maxlength="5" placeholder="0:15" aria-describedby="f-time-hint">
         <small id="f-time-hint">M:SS (max 7:00). Earliest moment in the loop this can happen. Blank = no requirement.</small>
       </label>
+      <div class="field" id="req-field">
+        <span>Requires permanent unlocks</span>
+        <div class="req-list" id="req-list"></div>
+        <small>Unlocks kept from earlier loops that the player must already have. No arrow needed.</small>
+      </div>
       <label class="field"><span>Text</span><textarea id="f-text" placeholder="Dialogue / description"></textarea></label>
       <div class="panel-foot">
         <button type="button" class="btn" id="btn-add-child" title="Create a new node to the right and link it from this one"><svg class="i"><use href="#i-plus"/></svg>Add next node</button>
@@ -421,7 +466,7 @@
   var MAX_TIME = 7 * 60;                      // slider range, in seconds
   var STORAGE_KEY = 'clockrush-loop-map-v1';
   var FORMAT = 'clockrush-loop-map';
-  var VERSION = 2;
+  var VERSION = 3;
   var ACT_ORDER = ['Act 1', 'Act 2', 'Act 3', 'Any'];
   var FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
   var INK = '#1b2130', SUB_INK = '#566074', LOC_INK = '#7a8499';
@@ -435,6 +480,11 @@
     'Permanent Unlock': { radius: 0,  borderWidth: 3, bg: '#f8c7c2', hover: '#fcdad7', border: '#cf3a2f' }    // sharp, heavier border
   };
   var DEFAULT_NODE_TYPE = 'Interaction';
+  var NODE_TYPE_HINTS = {
+    'Interaction': 'Something the player does.',
+    'Knowledge Gain': 'Learning something the player keeps between loops. Others use it through a Knowledge Prerequisite arrow.',
+    'Permanent Unlock': 'Obtaining a permanent unlock, kept between loops. Other nodes require it in their “Requires permanent unlocks” list; no arrow needed.'
+  };
 
   // The Start node is a flag on one Interaction node, drawn dark so it can't be mistaken for anything else.
   var START_STYLE = { radius: 16, borderWidth: 3, bg: '#243046', hover: '#33415c', border: '#0b1220', ink: '#ffffff', sub: '#c9d1e0', loc: '#9fb0cc' };
@@ -448,18 +498,22 @@
     'Any':   { color: '#8794a8', label: 'ANY ACT', mark: '∞', name: 'Any act' }
   };
 
+  // Three kinds of arrow. Only the two prerequisite kinds gate availability in Simulation Mode:
+  //   knowledge - the source is a Knowledge Gain node ticked as obtained (kept between loops)
+  //   loop      - the source was done earlier in the CURRENT loop (ticked under "Done this loop")
+  // Permanent unlocks deliberately have no arrow: a node lists the unlocks it requires (node.needs).
   var EDGE_TYPES = {
     'Cause-Effect': {
-      color: '#000000', width: 2, dashes: false, arrow: 1, prereq: false,
-      desc: 'The source leads to the target. Informational only: it does not gate availability in Simulation Mode.'
+      color: '#000000', width: 2, dashes: false, arrow: 1, prereq: false, gate: null,
+      desc: 'The default arrow: after this, you can do that. It shows the flow only and never blocks anything in Simulation Mode.'
     },
     'Knowledge Prerequisite': {
-      color: '#1f6feb', width: 2.5, dashes: [9, 6], arrow: 1, prereq: true,
-      desc: 'The target requires the knowledge gained from the source node. Met when the source is ticked as obtained in Simulation Mode.'
+      color: '#1f6feb', width: 2.5, dashes: [9, 6], arrow: 1, prereq: true, gate: 'knowledge',
+      desc: 'The target needs the knowledge gained at the source (a Knowledge Gain node, ticked under Knowledge in Simulation Mode). Knowledge is kept between loops.'
     },
     'Mechanical Prerequisite': {
-      color: '#d92d20', width: 6, dashes: false, arrow: 0.7, prereq: true,
-      desc: 'The target requires the permanent item / unlock from the source node. Met when the source is ticked as obtained in Simulation Mode.'
+      color: '#d92d20', width: 6, dashes: false, arrow: 0.7, prereq: true, gate: 'loop',
+      desc: 'An in-loop requirement: the target needs the source to have been done earlier in the same loop (ticked under Done this loop in Simulation Mode). It starts over every loop. Permanent unlocks use no arrow: set them on the node.'
     }
   };
   var DEFAULT_EDGE_TYPE = 'Cause-Effect';
@@ -539,6 +593,12 @@
 
   function actOf(n) { return ACT_STYLE[n.act] ? n.act : 'Any'; }
 
+  // The Act a node requires the player to have reached: Act 1 -> 1, Act 2 -> 2, Act 3 -> 3, Any -> 0 (no requirement).
+  function actRank(act) {
+    var i = ['Act 1', 'Act 2', 'Act 3'].indexOf(act);
+    return i < 0 ? 0 : i + 1;
+  }
+
   /* ----- tiny SVG samples used by the legend and panels ----- */
   function nodeSample(kind) {
     var t = NODE_TYPES[kind] || NODE_TYPES[DEFAULT_NODE_TYPE];
@@ -560,6 +620,15 @@
   function orphanSample() {
     var svg = svgEl('svg', { width: 30, height: 20, viewBox: '0 0 30 20', 'aria-hidden': 'true' });
     svg.append(svgEl('rect', { x: 2, y: 3, width: 26, height: 14, rx: 4, fill: '#c4ebd0', stroke: '#2e9d5b', 'stroke-width': 2, 'stroke-dasharray': '4 3' }));
+    return svg;
+  }
+
+  function lockSample() {
+    var svg = svgEl('svg', { width: 30, height: 20, viewBox: '0 0 30 20', 'aria-hidden': 'true' });
+    svg.append(svgEl('rect', { x: 2, y: 3, width: 26, height: 14, rx: 7, fill: NODE_TYPES['Permanent Unlock'].border }));
+    svg.append(svgEl('path', { d: 'M9 9.5a3 3 0 0 1 6 0', fill: 'none', stroke: '#fff', 'stroke-width': 1.6 }));
+    svg.append(svgEl('rect', { x: 8, y: 9.5, width: 8, height: 5.5, fill: '#fff' }));
+    svg.append(svgEl('text', { x: 21.5, y: 13.6, 'text-anchor': 'middle', 'font-size': 9, 'font-weight': 700, fill: '#fff', 'font-family': FONT }, '2'));
     return svg;
   }
 
@@ -608,6 +677,8 @@
     fTime: $('#f-time'), fTimeHint: $('#f-time-hint'), fText: $('#f-text'),
     nodeBadge: $('#node-badge'), nodeActBadge: $('#node-act-badge'), btnAddChild: $('#btn-add-child'), btnDelNode: $('#btn-del-node'),
     eFrom: $('#e-from'), eTo: $('#e-to'), eType: $('#e-type'), ePreview: $('#e-preview'), eDesc: $('#e-desc'), eWarn: $('#e-warn'),
+    fTypeHint: $('#f-type-hint'), reqField: $('#req-field'), reqList: $('#req-list'),
+    actPick: $('#act-pick'), listLoop: $('#list-loop'), simNewLoop: $('#sim-new-loop'),
     simTime: $('#sim-time'), simTimeOut: $('#sim-time-out'), simSummary: $('#sim-summary'), simReset: $('#sim-reset')
   };
 
@@ -624,12 +695,14 @@
   var mode = 'edit';                 // 'edit' | 'sim'
   var linking = false;               // Add Edge mode armed
   var simTime = 0;                   // seconds
-  var obtained = new Set();          // ids of Knowledge / Permanent nodes ticked in Simulation Mode
+  var simAct = 'Act 1';              // the Act the player is in (Simulation Mode)
+  var obtained = new Set();          // ids of Knowledge / Permanent Unlock nodes the player has (kept between loops)
+  var doneNow = new Set();           // ids of nodes done in the CURRENT loop (sources of Mechanical Prerequisite arrows)
   var selSig = '';                   // 'n:<id>' | 'e:<id>' | '' - what the right panel is showing
   var lastEval = new Map();          // node id -> evaluation (Simulation Mode)
   var orphanIds = [];                // nodes that cannot be reached from Start (Edit Mode warning)
   var orphanCursor = 0;
-  var view = { locations: false, acts: false };   // canvas overlays
+  var view = { locations: false, acts: false, nest: 'location' };   // canvas overlays; nest = which grouping is the outer one when both are on
   var nodeSeq = 0, edgeSeq = 0;
   var styleCache = new Map();        // id -> JSON of the last style pushed to vis
   var animToken = 0;                 // bumped to cancel a running arrange animation
@@ -644,10 +717,12 @@
     var seen = new Set(), s = startNode();
     if (!s) return seen;
     var out = new Map();
-    edges.forEach(function (e) {
-      if (!out.has(e.from)) out.set(e.from, []);
-      out.get(e.from).push(e.to);
-    });
+    function link(from, to) {
+      if (!out.has(from)) out.set(from, []);
+      out.get(from).push(to);
+    }
+    edges.forEach(function (e) { link(e.from, e.to); });
+    nodes.forEach(function (n) { (n.needs || []).forEach(function (id) { link(id, n.id); }); });   // "requires unlock X" comes from X
     var queue = [s.id];
     seen.add(s.id);
     while (queue.length) {
@@ -660,25 +735,38 @@
 
   /* =====================================================================
      SIMULATION LOGIC
-     A node is Available when
-       time requirement <= slider   AND
-       every inbound Knowledge/Mechanical prerequisite edge has an obtained source.
+     A node is Available when ALL of these hold:
+       - its time requirement <= the slider
+       - its Act is not later than the Act the player is in ("Any" needs none)
+       - every inbound Knowledge Prerequisite arrow has an obtained source        (kept between loops)
+       - every inbound Mechanical Prerequisite arrow has a source done this loop   (cleared each loop)
+       - every permanent unlock in its "requires" list has been obtained           (kept between loops, no arrows)
+     Cause-Effect arrows only show flow and never gate anything.
      ===================================================================== */
   function evaluate() {
-    var inbound = new Map();
+    var knowledgeIn = new Map(), loopIn = new Map();
     edges.forEach(function (e) {
       var t = EDGE_TYPES[e.kind];
-      if (t && t.prereq) {
-        if (!inbound.has(e.to)) inbound.set(e.to, []);
-        inbound.get(e.to).push(e);
-      }
+      if (!t || !t.gate) return;
+      var map = t.gate === 'loop' ? loopIn : knowledgeIn;
+      if (!map.has(e.to)) map.set(e.to, []);
+      map.get(e.to).push(e);
     });
+    var here = actRank(simAct);
     var result = new Map();
     nodes.forEach(function (n) {
       var need = parseTime(n.time) || 0;
       var timeOk = need <= simTime;
-      var missing = (inbound.get(n.id) || []).filter(function (e) { return !obtained.has(e.from); });
-      result.set(n.id, { need: need, timeOk: timeOk, missing: missing, available: timeOk && missing.length === 0 });
+      var actNeed = n.start ? 0 : actRank(n.act);
+      var actOk = actNeed <= here;
+      var missing = (knowledgeIn.get(n.id) || []).filter(function (e) { return !obtained.has(e.from); });
+      var missingLoop = (loopIn.get(n.id) || []).filter(function (e) { return !doneNow.has(e.from); });
+      var missingUnlocks = (n.needs || []).filter(function (id) { return !obtained.has(id); });
+      result.set(n.id, {
+        need: need, timeOk: timeOk, actNeed: actNeed, actOk: actOk,
+        missing: missing, missingLoop: missingLoop, missingUnlocks: missingUnlocks,
+        available: timeOk && actOk && !missing.length && !missingLoop.length && !missingUnlocks.length
+      });
     });
     return result;
   }
@@ -752,8 +840,8 @@
     var t = EDGE_TYPES[e.kind] || EDGE_TYPES[DEFAULT_EDGE_TYPE];
     var opacity = 1;
     if (mode === 'sim') {
-      if (t.prereq) {
-        opacity = obtained.has(e.from) ? 1 : EDGE_DIM;                       // met vs. unmet prerequisite
+      if (t.gate) {
+        opacity = (t.gate === 'loop' ? doneNow : obtained).has(e.from) ? 1 : EDGE_DIM;   // met vs. unmet prerequisite
       } else {
         var a = lastEval.get(e.from), b = lastEval.get(e.to);
         opacity = a && b && a.available && b.available ? 1 : EDGE_DIM;
@@ -897,34 +985,63 @@
     return b && b.right > b.left && b.bottom > b.top ? b : null;
   }
 
-  // Everything the overlays need, derived from current positions: [{ rect, key, name }] and [{ rect, act }].
+  // Outline / label styling for a region (outer family) or a pod (inner band), by what it groups.
+  function shapeStyle(kind, key, name, pod) {
+    if (kind === 'act') {
+      var a = ACT_STYLE[key];
+      return { title: a.label, fill: rgba(a.color, pod ? 0.13 : 0.08), stroke: rgba(a.color, 0.65), text: a.color };
+    }
+    var hue = key ? hueOf(key) : null;
+    return {
+      title: (name || 'No location').toUpperCase(),
+      fill: hue === null ? 'rgba(100,116,139,' + (pod ? 0.1 : 0.07) + ')' : 'hsla(' + hue + ',70%,52%,' + (pod ? 0.13 : 0.075) + ')',
+      stroke: hue === null ? 'rgba(100,116,139,0.55)' : 'hsla(' + hue + ',55%,40%,0.6)',
+      text: hue === null ? '#475569' : 'hsl(' + hue + ',55%,28%)'
+    };
+  }
+
+  // Everything the overlays need, derived from current positions: regions (outer families) and pods (inner bands).
+  // Locations only -> a region per location. Act bands only -> a pod per Act. Both -> view.nest says which
+  // one is outside: regions per location with Act pods inside (default), or regions per Act with location pods inside.
   function overlayShapes() {
-    var items = [];
-    nodes.forEach(function (n) { var b = nodeBox(n.id); if (b) items.push({ n: n, b: b }); });
+    var both = view.locations && view.acts;
+    var outerKind = both ? (view.nest === 'act' ? 'act' : 'location') : (view.locations ? 'location' : null);
+    var innerKind = both ? (outerKind === 'act' ? 'location' : 'act') : (view.acts ? 'act' : null);
+    var anyPlace = nodes.get({ filter: function (n) { return !!locKey(n.location); } }).length > 0;
+    if (!anyPlace) {                                      // no node has a location: nothing to outline by place
+      if (outerKind === 'location') outerKind = null;
+      if (innerKind === 'location') innerKind = null;
+    }
+    function keyOf(kind, n) { return kind === 'act' ? actOf(n) : locKey(n.location); }
+    function nameOf(kind, n) { return kind === 'act' ? ACT_STYLE[actOf(n)].name : tidyLoc(n.location); }
+
     var groups = new Map();
-    items.forEach(function (it) {
-      var key = view.locations ? locKey(it.n.location) : '';
-      if (!groups.has(key)) groups.set(key, { key: key, name: tidyLoc(it.n.location), items: [], byAct: {} });
-      var g = groups.get(key), act = actOf(it.n);
-      g.items.push(it.b);
-      (g.byAct[act] = g.byAct[act] || []).push(it.b);
+    nodes.forEach(function (n) {
+      var b = nodeBox(n.id);
+      if (!b) return;
+      var key = outerKind ? keyOf(outerKind, n) : '';
+      if (!groups.has(key)) groups.set(key, { key: key, name: outerKind ? nameOf(outerKind, n) : '', rects: [], inner: new Map() });
+      var g = groups.get(key);
+      g.rects.push(b);
+      if (innerKind) {
+        var ik = keyOf(innerKind, n);
+        if (!g.inner.has(ik)) g.inner.set(ik, { key: ik, name: nameOf(innerKind, n), rects: [] });
+        g.inner.get(ik).rects.push(b);
+      }
     });
+
     var regions = [], pods = [];
-    var onlyUnplaced = groups.size === 1 && groups.has('');      // no node has a location: nothing to outline
     groups.forEach(function (g) {
       var podRects = [];
-      if (view.acts) {
-        ACT_ORDER.forEach(function (act) {
-          if (!g.byAct[act]) return;
-          var r = grow(union(g.byAct[act]), 18, 46, 18, 16);
-          podRects.push(r);
-          pods.push({ rect: r, act: act });
-        });
-      }
-      if (view.locations && !onlyUnplaced) {
+      Array.from(g.inner.values()).forEach(function (ig) {
+        var r = grow(union(ig.rects), 18, 46, 18, 16);
+        podRects.push(r);
+        pods.push({ rect: r, kind: innerKind, key: ig.key, style: shapeStyle(innerKind, ig.key, ig.name, true) });
+      });
+      if (outerKind) {
         regions.push({
-          key: g.key, name: g.name,
-          rect: podRects.length ? grow(union(podRects), 22, 50, 22, 22) : grow(union(g.items), 34, 56, 34, 34)
+          rect: podRects.length ? grow(union(podRects), 22, 50, 22, 22) : grow(union(g.rects), 34, 56, 34, 34),
+          kind: outerKind, key: g.key, style: shapeStyle(outerKind, g.key, g.name, false)
         });
       }
     });
@@ -939,24 +1056,24 @@
     frame = (view.locations || view.acts) ? overlayShapes() : { regions: [], pods: [] };
     ctx.save();
     frame.regions.forEach(function (r) {
-      var hue = r.key ? hueOf(r.key) : null;
-      r.title = (r.name || 'No location').toUpperCase();
       ctx.font = 'bold 24px ' + FONT;
-      r.hue = hue;
       r.x = r.rect.left; r.y = r.rect.top;
-      r.w = Math.max(r.rect.right - r.rect.left, ctx.measureText(r.title).width + 40);
+      r.w = Math.max(r.rect.right - r.rect.left, ctx.measureText(r.style.title).width + 40);
       roundRect(ctx, r.x, r.y, r.w, r.rect.bottom - r.y, 24);
-      ctx.fillStyle = hue === null ? 'rgba(100,116,139,0.07)' : 'hsla(' + hue + ',70%,52%,0.075)';
+      ctx.fillStyle = r.style.fill;
       ctx.fill();
       ctx.lineWidth = 2.5;
       ctx.setLineDash([14, 9]);
-      ctx.strokeStyle = hue === null ? 'rgba(100,116,139,0.55)' : 'hsla(' + hue + ',55%,40%,0.6)';
+      ctx.strokeStyle = r.style.stroke;
       ctx.stroke();
       ctx.setLineDash([]);
     });
     frame.pods.forEach(function (p) {
-      roundRect(ctx, p.rect.left, p.rect.top, p.rect.right - p.rect.left, p.rect.bottom - p.rect.top, 16);
-      ctx.fillStyle = rgba(ACT_STYLE[p.act].color, 0.13);
+      ctx.font = 'bold 14px ' + FONT;
+      p.x = p.rect.left; p.y = p.rect.top;
+      p.w = Math.max(p.rect.right - p.rect.left, ctx.measureText(p.style.title).width + 28);
+      roundRect(ctx, p.x, p.y, p.w, p.rect.bottom - p.y, 16);
+      ctx.fillStyle = p.style.fill;
       ctx.fill();
     });
     ctx.restore();
@@ -974,12 +1091,8 @@
       ctx.strokeText(text, x, y);
       ctx.fillStyle = fill; ctx.fillText(text, x, y);
     }
-    frame.regions.forEach(function (r) {
-      label(r.title, r.x + 20, r.y + 14, 'bold 24px ' + FONT, r.hue === null ? '#475569' : 'hsl(' + r.hue + ',55%,28%)', 6);
-    });
-    frame.pods.forEach(function (p) {
-      label(ACT_STYLE[p.act].label, p.rect.left + 14, p.rect.top + 10, 'bold 14px ' + FONT, ACT_STYLE[p.act].color, 4);
-    });
+    frame.regions.forEach(function (r) { label(r.style.title, r.x + 20, r.y + 14, 'bold 24px ' + FONT, r.style.text, 6); });
+    frame.pods.forEach(function (p) { label(p.style.title, p.x + 14, p.y + 10, 'bold 14px ' + FONT, p.style.text, 4); });
     ctx.restore();
   }
 
@@ -1010,6 +1123,19 @@
         ctx.fillStyle = '#ffffff';
         ctx.fillText(a.mark, cx, cy + 0.5);
       }
+      var wanted = (n.needs || []).length;                    // required permanent unlocks: padlock + count on the bottom edge
+      if (wanted) {
+        var unmet = ev ? ev.missingUnlocks.length > 0 : true;  // Simulation Mode shows green once they are all held
+        var pw = 40, px = b.right - 16 - pw, py = b.bottom - 10, pcy = py + 10;
+        roundRect(ctx, px, py, pw, 20, 10);
+        ctx.fillStyle = unmet ? NODE_TYPES['Permanent Unlock'].border : '#2e9d5b'; ctx.fill();
+        ctx.lineWidth = 3; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+        ctx.lineWidth = 1.8; ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(px + 13, pcy - 1.5, 3.3, Math.PI, 0); ctx.stroke();   // shackle
+        ctx.fillRect(px + 8.5, pcy - 1.5, 9, 6.5);                                      // body
+        ctx.font = 'bold 12px ' + FONT;
+        ctx.fillText(String(wanted), px + 29, pcy + 0.5);
+      }
     });
     ctx.restore();
   }
@@ -1028,7 +1154,9 @@
      leading to them. Inside a block (one Act, optionally of one Location) that rank becomes the column,
      and a few barycentre sweeps order the rows to cut down crossings.
        flow     - a single group; Acts are consecutive column bands.
-       location - one group per location, packed into a landscape grid; each group is a flow of its own.
+       location - one group per location, packed into a landscape grid; each group is a flow of its own
+                  with its Acts as column bands.
+       act      - one group per Act, packed the same way; inside, each location is a column band.
      ===================================================================== */
   var COL_W = 250, ROW_H = 130, ACT_GAP = 70, GROUP_GAP_X = 190, GROUP_GAP_Y = 200;
 
@@ -1085,14 +1213,26 @@
       return { rel: rel, width: cols.length * COL_W, height: Math.max.apply(null, cols.map(function (c) { return c.length; })) * ROW_H };
     }
 
-    // All Acts of one group side by side.
+    // All blocks of one group side by side: one block per Act (flow / location grouping)
+    // or one block per location (act grouping).
+    var blockByPlace = groupBy === 'act';
     function layoutGroup(g) {
-      var byAct = {};
-      g.nodes.forEach(function (n) { var a = ACT_STYLE[n.act] ? n.act : 'Any'; (byAct[a] = byAct[a] || []).push(n); });
+      var map = new Map();
+      g.nodes.forEach(function (n) {
+        var k = blockByPlace ? locKey(n.location) : (ACT_STYLE[n.act] ? n.act : 'Any');
+        if (!map.has(k)) map.set(k, []);
+        map.get(k).push(n);
+      });
+      var keys = Array.from(map.keys());
+      if (blockByPlace) {                                    // story order, unplaced nodes last
+        var first = function (k) { return Math.min.apply(null, map.get(k).map(function (n) { return layer[n.id]; })); };
+        keys.sort(function (a, b) { return ((a === '') - (b === '')) || (first(a) - first(b)) || a.localeCompare(b); });
+      } else {
+        keys.sort(function (a, b) { return ACT_ORDER.indexOf(a) - ACT_ORDER.indexOf(b); });
+      }
       var x = 0, height = ROW_H, blocks = [];
-      ACT_ORDER.forEach(function (act) {
-        if (!byAct[act]) return;
-        var b = layoutBlock(byAct[act]);
+      keys.forEach(function (k) {
+        var b = layoutBlock(map.get(k));
         b.x = x; x += b.width + ACT_GAP;
         height = Math.max(height, b.height);
         blocks.push(b);
@@ -1104,25 +1244,32 @@
       return { width: Math.max(COL_W, x - ACT_GAP), height: height, placed: placed };
     }
 
+    function groupKey(n) {
+      if (groupBy === 'location') return locKey(n.location);
+      if (groupBy === 'act') return ACT_STYLE[n.act] ? n.act : 'Any';
+      return '';
+    }
     var groups = new Map();
     list.forEach(function (n) {
-      var key = groupBy === 'location' ? locKey(n.location) : '';
-      if (!groups.has(key)) groups.set(key, { key: key, name: tidyLoc(n.location), nodes: [] });
+      var key = groupKey(n);
+      if (!groups.has(key)) groups.set(key, { key: key, name: groupBy === 'act' ? key : tidyLoc(n.location), nodes: [] });
       groups.get(key).nodes.push(n);
     });
     var gl = Array.from(groups.values()).map(function (g) { return Object.assign(g, layoutGroup(g)); });
 
-    if (groupBy !== 'location') {
+    if (groupBy !== 'location' && groupBy !== 'act') {
       Object.keys(gl[0].placed).forEach(function (id) { out[id] = { x: gl[0].placed[id].x, y: gl[0].placed[id].y - gl[0].height / 2 }; });
       return out;
     }
 
-    // Story order: the group holding Start first, then by how early its nodes sit in the flow.
+    // Locations: story order (the family holding Start first, then by how early its nodes sit in the flow).
+    // Acts: simply Act 1, Act 2, Act 3, Any.
     gl.forEach(function (g) {
       g.hasStart = g.nodes.some(function (n) { return n.start; });
       g.first = Math.min.apply(null, g.nodes.map(function (n) { return layer[n.id]; }));
     });
     gl.sort(function (a, b) {
+      if (groupBy === 'act') return ACT_ORDER.indexOf(a.key) - ACT_ORDER.indexOf(b.key);
       return (b.hasStart - a.hasStart) || (a.first - b.first) || a.name.localeCompare(b.name);
     });
 
@@ -1151,10 +1298,18 @@
     return out;
   }
 
+  // "Requires unlock X" has no arrow but still means "comes after X", so it orders the layout like one.
+  function needEdges(list) {
+    var out = [];
+    list.forEach(function (n) { (n.needs || []).forEach(function (id) { out.push({ from: id, to: n.id }); }); });
+    return out;
+  }
+
   function layoutInput() {
+    var all = nodes.get();
     return {
-      list: nodes.get().map(function (n) { return { id: n.id, act: n.act, location: n.location, time: n.time, title: n.name, start: n.start }; }),
-      edgeList: edges.get().map(function (e) { return { from: e.from, to: e.to }; })
+      list: all.map(function (n) { return { id: n.id, act: n.act, location: n.location, time: n.time, title: n.name, start: n.start }; }),
+      edgeList: edges.get().map(function (e) { return { from: e.from, to: e.to }; }).concat(needEdges(all))
     };
   }
 
@@ -1183,12 +1338,13 @@
     var before = serialize();
     var input = layoutInput();
     var pos = computeLayout(input.list, input.edgeList, kind);
-    view.locations = kind === 'location';
+    view.locations = kind !== 'flow';
     view.acts = true;
+    view.nest = kind === 'act' ? 'act' : 'location';
     syncViewButtons();
     network.redraw();
     animateTo(pos, function () { fitView(true); saveSoon(); });
-    toast(kind === 'location' ? 'Grouped ' + input.list.length + ' nodes by location.' : 'Tidied ' + input.list.length + ' nodes.',
+    toast(kind === 'flow' ? 'Tidied ' + input.list.length + ' nodes.' : 'Grouped ' + input.list.length + ' nodes by ' + kind + '.',
           { action: { label: 'Undo', run: function () { loadState(before, { fit: true }); saveSoon(); } }, ms: 8000 });
   }
 
@@ -1200,11 +1356,12 @@
     return {
       format: FORMAT,
       version: VERSION,
-      view: { locations: view.locations, acts: view.acts },
+      view: { locations: view.locations, acts: view.acts, nest: view.nest },
       nodes: nodes.get().map(function (n) {
         var p = pos[n.id] || n, o = { id: n.id };
         if (n.start) o.start = true;
         o.title = n.name; o.type = n.kind; o.act = n.act; o.location = tidyLoc(n.location);
+        if (n.needs && n.needs.length) o.requiresUnlocks = n.needs.slice();
         o.time = n.time; o.text = n.text;
         o.x = Math.round(p.x || 0); o.y = Math.round(p.y || 0);
         return o;
@@ -1256,7 +1413,9 @@
       var title = n.title != null ? n.title : (n.name != null ? n.name : n.label);
       var text = n.text != null ? n.text : (n.description != null ? n.description : n.dialogue);
       var loc = n.location != null ? n.location : n.place;
+      var needsRaw = Array.isArray(n.requiresUnlocks) ? n.requiresUnlocks : (Array.isArray(n.requires) ? n.requires : []);
       return {
+        needsRaw: needsRaw.map(String), needs: [],
         id: id, title: title == null ? '' : String(title), type: kind, act: act, location: tidyLoc(loc),
         time: n.time == null || String(n.time).trim() === '' ? '' : fmtTime(secs),
         text: text == null ? '' : String(text),
@@ -1269,6 +1428,20 @@
     list.forEach(function (n) { if (n.start && starts++) { n.start = false; extraStarts++; } });
     var startItem = list.filter(function (n) { return n.start; })[0] || null;
 
+    // Required permanent unlocks: ids of Permanent Unlock nodes (never self, never on Start).
+    var byId = new Map(list.map(function (n) { return [n.id, n]; }));
+    var badNeeds = 0;
+    list.forEach(function (n) {
+      n.needsRaw.forEach(function (raw0) {
+        var id = idMap.get(raw0), target = id && byId.get(id);
+        if (!target || target.type !== 'Permanent Unlock' || id === n.id || n === startItem) { badNeeds++; return; }
+        if (n.needs.indexOf(id) === -1) n.needs.push(id);
+      });
+      delete n.needsRaw;
+    });
+    // Before version 3 a red arrow out of a Permanent Unlock node meant "needs this unlock".
+    var legacy = typeof raw.version === 'number' && raw.version < 3, converted = 0;
+
     var edgeList = [], seenEdge = new Set(), droppedEdges = 0, eseq = 0;
     (Array.isArray(raw.edges) ? raw.edges : []).forEach(function (e) {
       if (!e || typeof e !== 'object') { droppedEdges++; return; }
@@ -1277,6 +1450,14 @@
       var typeRaw = e.type != null ? e.type : e.kind;
       var kind = lookup(EDGE_ALIASES, typeRaw, null);
       if (!kind) { kind = DEFAULT_EDGE_TYPE; if (typeRaw != null) badEnum++; }
+      if (legacy && kind === 'Mechanical Prerequisite' && from && to && from !== to) {
+        var src = byId.get(from), dst = byId.get(to);
+        if (src && dst && src.type === 'Permanent Unlock' && dst !== startItem) {
+          if (dst.needs.indexOf(from) === -1) dst.needs.push(from);
+          kind = DEFAULT_EDGE_TYPE;                     // keep the link in the flow, move the requirement onto the node
+          converted++;
+        }
+      }
       var key = from + '>' + to + '>' + kind;
       if (!from || !to || from === to || (startItem && to === startItem.id) || seenEdge.has(key)) { droppedEdges++; return; }
       seenEdge.add(key);
@@ -1286,9 +1467,10 @@
     var startAdded = false;
     if (!startItem) {                                   // every map needs a Start: add one, feeding the root nodes
       startAdded = true;
-      startItem = { id: freshId(), title: 'Start', type: DEFAULT_NODE_TYPE, act: 'Act 1', location: '', time: '',
+      startItem = { id: freshId(), title: 'Start', type: DEFAULT_NODE_TYPE, act: 'Act 1', location: '', time: '', needs: [],
                     text: 'Where every loop begins.', start: true, x: null, y: null };
       var hasIn = new Set(edgeList.map(function (e) { return e.to; }));
+      list.forEach(function (n) { if (n.needs.length) hasIn.add(n.id); });          // a node fed by an unlock already comes from somewhere
       var roots = list.filter(function (n) { return !hasIn.has(n.id); });
       if (!roots.length && list.length) roots = [list[0]];
       roots.forEach(function (r) { edgeList.push({ id: 'e' + (++eseq), from: startItem.id, to: r.id, type: DEFAULT_EDGE_TYPE }); });
@@ -1300,10 +1482,10 @@
       }
       list.unshift(startItem);
     }
-    startItem.type = DEFAULT_NODE_TYPE; startItem.act = 'Act 1'; startItem.time = '';
+    startItem.type = DEFAULT_NODE_TYPE; startItem.act = 'Act 1'; startItem.time = ''; startItem.needs = [];
 
-    var viewState = raw.view && typeof raw.view === 'object' ? { locations: !!raw.view.locations, acts: !!raw.view.acts } : null;
-    var autoView = layoutMissing(list, edgeList);
+    var viewState = raw.view && typeof raw.view === 'object' ? { locations: !!raw.view.locations, acts: !!raw.view.acts, nest: raw.view.nest === 'act' ? 'act' : 'location' } : null;
+    var autoView = layoutMissing(list, edgeList.concat(needEdges(list)));
     if (autoView) viewState = autoView;
 
     if (startAdded) warnings.push('Start node added');
@@ -1311,8 +1493,10 @@
     if (dupIds) warnings.push(dupIds + ' duplicate id(s) renumbered');
     if (badEnum) warnings.push(badEnum + ' unknown type/act value(s) defaulted');
     if (badTime) warnings.push(badTime + ' invalid time(s) reset to 0:00');
+    if (converted) warnings.push(converted + ' permanent-unlock arrow(s) turned into node requirements');
+    if (badNeeds) warnings.push(badNeeds + ' invalid unlock requirement(s) dropped');
     if (droppedEdges) warnings.push(droppedEdges + ' invalid/duplicate edge(s) skipped');
-    return { state: { nodes: list, edges: edgeList, view: viewState || { locations: false, acts: false } }, warnings: warnings };
+    return { state: { nodes: list, edges: edgeList, view: viewState || { locations: false, acts: false, nest: 'location' } }, warnings: warnings };
   }
 
   // Imported nodes without x/y get laid out. No positions at all: a full layout (grouped by location when the
@@ -1325,7 +1509,7 @@
       var byLocation = places.size >= 2;
       var pos = computeLayout(list, edgeList, byLocation ? 'location' : 'flow');
       list.forEach(function (n) { n.x = pos[n.id].x; n.y = pos[n.id].y; });
-      return { locations: byLocation, acts: true };
+      return { locations: byLocation, acts: true, nest: 'location' };
     }
     var placed = list.filter(function (n) { return n.x !== null && n.y !== null; });
     var minX = Math.min.apply(null, placed.map(function (n) { return n.x; }));
@@ -1347,12 +1531,12 @@
     network.unselectAll();
     selSig = ''; dom.editPanel.hidden = true;
     styleCache.clear();
-    view = { locations: !!(state.view && state.view.locations), acts: !!(state.view && state.view.acts) };
+    view = { locations: !!(state.view && state.view.locations), acts: !!(state.view && state.view.acts), nest: state.view && state.view.nest === 'act' ? 'act' : 'location' };
     syncViewButtons();
     nodes.clear(); edges.clear();
     nodes.add(state.nodes.map(function (n) {
       return { id: n.id, name: n.title, kind: n.type, act: n.act, location: n.location || '', time: n.time, text: n.text,
-               start: !!n.start, x: n.x, y: n.y };
+               needs: (n.needs || n.requiresUnlocks || []).slice(), start: !!n.start, x: n.x, y: n.y };
     }));
     edges.add(state.edges.map(function (e) { return { id: e.id, from: e.from, to: e.to, kind: e.type }; }));
     nodeSeq = maxSeq(state.nodes, 'n');
@@ -1410,24 +1594,26 @@
         N('n1', 'Wake Up at 6:00', 'Interaction', 'Act 1', BH, '', 'The wall clock reads 6:00 again. The boarding house is quiet. Nothing has changed since the last loop: the world is deterministic.', { start: true }),
         N('n2', 'Overhear the Landlord', 'Knowledge Gain', 'Act 1', BH, '0:30', 'Through the floorboards: "I hide the cellar key behind the pantry clock. Nobody would think to look there."'),
         N('n3', 'Search Behind the Pantry Clock', 'Interaction', 'Act 1', BH, '1:15', 'Only works if you know where to look. Behind the clock face: a small brass key.'),
-        N('n4', 'Brass Cellar Key', 'Permanent Unlock', 'Act 1', BH, '1:20', 'You keep the key across loops, so you can carry it from the very first second next time.'),
-        N('n5', 'Unlock the Cellar', 'Interaction', 'Act 2', 'Cellar', '2:00', 'The key turns. Damp air, stacked crates, and a ledger lying open on a workbench.'),
+        N('n4', 'Brass Cellar Key', 'Permanent Unlock', 'Act 1', BH, '1:20', 'Obtaining the key. You keep it across loops, so you can carry it from the very first second next time.'),
+        N('n5', 'Unlock the Cellar', 'Interaction', 'Act 2', 'Cellar', '2:00', 'The key turns. Damp air, stacked crates, and a ledger lying open on a workbench.', { requiresUnlocks: ['n4'] }),
         N('n6', 'Read the Ledger', 'Knowledge Gain', 'Act 2', 'Cellar', '2:30', 'Today\'s entry: the mayor\'s courier delivers the payment at exactly 5:45.'),
         N('n7', 'Barter with the Tinker', 'Interaction', 'Act 2', 'Market Square', '1:45', 'The tinker trades tools for gossip. Give him something good and he\'ll part with a crowbar.'),
-        N('n8', 'Iron Crowbar', 'Permanent Unlock', 'Act 2', 'Market Square', '3:00', 'A sturdy crowbar. It persists across loops.'),
-        N('n9', 'Pry Open the Clocktower Door', 'Interaction', 'Act 3', 'Clocktower', '6:00', 'Needs the crowbar to force the door and the courier\'s schedule to time it right.'),
+        N('n8', 'Iron Crowbar', 'Permanent Unlock', 'Act 2', 'Market Square', '3:00', 'Obtaining the crowbar. It persists across loops.'),
+        N('n9', 'Pry Open the Clocktower Door', 'Interaction', 'Act 3', 'Clocktower', '6:00', 'Needs the crowbar to force the door, the courier\'s schedule to time it right, and the watchman out of the way in this very loop.', { requiresUnlocks: ['n8'] }),
         N('n10', 'Reach the Clock Face', 'Interaction', 'Act 3', 'Clocktower', '6:30', 'The hands are about to strike 7:00. Reach inside: is this how the loop breaks?'),
         N('n11', 'Ask the Cook About the Landlord', 'Interaction', 'Act 1', BH, '0:45', 'The cook rolls her eyes. "He\'s been counting the silverware at night. Ask him yourself."'),
-        N('n12', 'Confront the Landlord', 'Interaction', 'Act 3', BH, '5:00', 'Armed with what the ledger says, you finally have the upper hand.')
+        N('n12', 'Confront the Landlord', 'Interaction', 'Act 3', BH, '5:00', 'Armed with what the ledger says, you finally have the upper hand.'),
+        N('n13', 'Distract the Night Watchman', 'Interaction', 'Act 3', 'Market Square', '5:15', 'Has to happen in the same loop as the break-in: he wanders back to his post after a few minutes.')
       ],
       edges: [
         E('n1', 'n2', 'Cause-Effect'), E('n1', 'n7', 'Cause-Effect'), E('n1', 'n11', 'Cause-Effect'),
         E('n2', 'n3', 'Knowledge Prerequisite'), E('n2', 'n3', 'Cause-Effect'),
-        E('n3', 'n4', 'Cause-Effect'), E('n4', 'n5', 'Mechanical Prerequisite'),
+        E('n3', 'n4', 'Cause-Effect'), E('n4', 'n5', 'Cause-Effect'),
         E('n5', 'n6', 'Cause-Effect'), E('n7', 'n8', 'Cause-Effect'),
-        E('n8', 'n9', 'Mechanical Prerequisite'), E('n6', 'n9', 'Knowledge Prerequisite'),
+        E('n8', 'n9', 'Cause-Effect'), E('n6', 'n9', 'Knowledge Prerequisite'),
         E('n9', 'n10', 'Cause-Effect'),
-        E('n11', 'n12', 'Cause-Effect'), E('n6', 'n12', 'Knowledge Prerequisite')
+        E('n11', 'n12', 'Cause-Effect'), E('n6', 'n12', 'Knowledge Prerequisite'),
+        E('n8', 'n13', 'Cause-Effect'), E('n13', 'n9', 'Mechanical Prerequisite')
       ]
     };
   }
@@ -1475,9 +1661,42 @@
     dom.startNote.hidden = !locked;
     dom.btnDelNode.hidden = locked;
     dom.nodeHeading.textContent = locked ? 'START NODE' : 'NODE';
+    dom.fTypeHint.textContent = locked ? 'Where every loop begins.' : NODE_TYPE_HINTS[n.kind] || '';
+    dom.reqField.hidden = locked;
     setTimeValid(true);
     refreshNodeBadges(n);
     refreshLocationList();
+    renderReqList(n);
+  }
+
+  // "Requires permanent unlocks": one checkbox per Permanent Unlock node (other than this one).
+  function renderReqList(n) {
+    var unlocks = nodes.get({ filter: function (u) { return u.kind === 'Permanent Unlock' && u.id !== n.id && !u.start; } });
+    unlocks.sort(function (a, b) { return ((parseTime(a.time) || 0) - (parseTime(b.time) || 0)) || nodeName(a).localeCompare(nodeName(b)); });
+    dom.reqList.replaceChildren();
+    if (!unlocks.length) {
+      dom.reqList.append(el('div', { class: 'req-empty', text: 'No other Permanent Unlock nodes yet. Give a node the type Permanent Unlock to make one.' }));
+      return;
+    }
+    unlocks.forEach(function (u) {
+      var box = el('input', { type: 'checkbox', dataset: { id: u.id } });
+      box.checked = (n.needs || []).indexOf(u.id) !== -1;
+      var loc = tidyLoc(u.location);
+      dom.reqList.append(el('label', { class: 'req-row' }, box, el('span', { text: nodeName(u) }), loc ? el('span', { class: 'loc', text: loc }) : null));
+    });
+  }
+  dom.reqList.addEventListener('change', function () {
+    var ids = Array.from(dom.reqList.querySelectorAll('input:checked')).map(function (b) { return b.dataset.id; });
+    patchSelectedNode({ needs: ids });
+  });
+
+  // Nobody can require an unlock that no longer exists (deleted, or its node stopped being a Permanent Unlock).
+  function dropUnlockRefs(goneIds) {
+    var touched = nodes.get({ filter: function (n) { return (n.needs || []).some(function (id) { return goneIds.indexOf(id) !== -1; }); } });
+    touched.forEach(function (n) {
+      nodes.update({ id: n.id, needs: n.needs.filter(function (id) { return goneIds.indexOf(id) === -1; }) });
+    });
+    return touched.length;
   }
   function refreshNodeBadges(n) {
     dom.nodeBadge.replaceChildren(n.start ? startSample() : nodeSample(n.kind));
@@ -1524,8 +1743,18 @@
     dom.nodeActBadge.replaceChildren(actBadge(dom.fAct.value, 22));
   });
   dom.fType.addEventListener('change', function () {
+    var n = selectedNode();
+    if (!n) return;
     patchSelectedNode({ kind: dom.fType.value });
     dom.nodeBadge.replaceChildren(nodeSample(dom.fType.value));
+    dom.fTypeHint.textContent = NODE_TYPE_HINTS[dom.fType.value] || '';
+    if (n.kind === 'Permanent Unlock' && dom.fType.value !== 'Permanent Unlock') {
+      var count = dropUnlockRefs([n.id]);
+      if (count) {
+        restyleAll();
+        toast('“' + nodeName(n) + '” is no longer a Permanent Unlock, so it was removed from the requirements of ' + count + (count === 1 ? ' node.' : ' nodes.'));
+      }
+    }
   });
   dom.fLoc.addEventListener('input', function () { patchSelectedNode({ location: dom.fLoc.value }); });
   dom.fLoc.addEventListener('blur', function () {
@@ -1549,11 +1778,17 @@
   function edgeWarning(e) {
     var t = EDGE_TYPES[e.kind], src = nodes.get(e.from);
     if (!t || !t.prereq || !src) return '';
-    if (src.kind === 'Interaction') {
-      return 'The source is an Interaction node, which has no “obtained” checkbox in Simulation Mode, so this prerequisite can never be met. Use a Knowledge Gain or Permanent Unlock node as the source.';
+    if (e.kind === 'Knowledge Prerequisite') {
+      if (src.kind === 'Interaction') {
+        return 'The source is an Interaction node, which has no \u201cobtained\u201d checkbox under Knowledge in Simulation Mode, so this prerequisite can never be met. Use a Knowledge Gain node as the source.';
+      }
+      if (src.kind === 'Permanent Unlock') {
+        return 'Heads-up: a Knowledge Prerequisite comes from a Knowledge Gain node. To require a permanent unlock, tick it on the target node instead.';
+      }
     }
-    if (e.kind === 'Knowledge Prerequisite' && src.kind === 'Permanent Unlock') return 'Heads-up: Knowledge Prerequisites normally come from a Knowledge Gain node.';
-    if (e.kind === 'Mechanical Prerequisite' && src.kind === 'Knowledge Gain') return 'Heads-up: Mechanical Prerequisites normally come from a Permanent Unlock node.';
+    if (e.kind === 'Mechanical Prerequisite' && src.kind === 'Permanent Unlock') {
+      return 'Heads-up: permanent unlocks need no arrow. Tick it under \u201cRequires permanent unlocks\u201d on the target node instead. This arrow only means \u201cdone earlier in the same loop\u201d.';
+    }
     return '';
   }
 
@@ -1651,7 +1886,8 @@
     network.unselectAll();
     edges.remove(Array.from(doomed));
     nodes.remove(nodeIds);
-    nodeIds.forEach(function (id) { obtained.delete(id); styleCache.delete('n' + id); });
+    dropUnlockRefs(nodeIds);
+    nodeIds.forEach(function (id) { obtained.delete(id); doneNow.delete(id); styleCache.delete('n' + id); });
     doomed.forEach(function (id) { styleCache.delete('e' + id); });
     selSig = ''; syncSelection();
     refreshLocationList();
@@ -1727,36 +1963,55 @@
   /* =====================================================================
      SIMULATION MODE: left sidebar
      ===================================================================== */
+  // Nodes that are the source of a Mechanical Prerequisite arrow: these are the "done this loop" candidates.
+  function loopSources() {
+    var ids = new Set();
+    edges.forEach(function (e) { var t = EDGE_TYPES[e.kind]; if (t && t.gate === 'loop') ids.add(e.from); });
+    return ids;
+  }
+
+  function checklistItem(n, set) {
+    var box = el('input', { type: 'checkbox', dataset: { id: n.id, set: set } });
+    box.checked = (set === 'loop' ? doneNow : obtained).has(n.id);
+    var a = ACT_STYLE[actOf(n)];
+    var chip = el('span', { class: 'chip', text: a.name });
+    chip.style.background = rgba(a.color, 0.2);
+    chip.style.boxShadow = 'inset 0 0 0 1.5px ' + a.color;
+    var loc = tidyLoc(n.location);
+    return el('li', {},
+      el('label', { class: 'chk' }, box,
+        el('span', { class: 'chk-main' },
+          el('span', { class: 'chk-name', text: nodeName(n) }),
+          loc ? el('span', { class: 'chk-loc', text: loc }) : null),
+        chip,
+        el('i', { class: 'dot', dataset: { id: n.id }, title: 'Glows when this node is currently available' })));
+  }
+
+  function byTimeThenName(a, b) {
+    return ((parseTime(a.time) || 0) - (parseTime(b.time) || 0)) || nodeName(a).localeCompare(nodeName(b));
+  }
+
   function buildSimPanel() {
     var valid = new Set();
     nodes.forEach(function (n) { if (n.kind === 'Knowledge Gain' || n.kind === 'Permanent Unlock') valid.add(n.id); });
     Array.from(obtained).forEach(function (id) { if (!valid.has(id)) obtained.delete(id); });
+    var sources = loopSources();
+    Array.from(doneNow).forEach(function (id) { if (!sources.has(id) || !nodes.get(id)) doneNow.delete(id); });
 
     GROUPS.forEach(function (g) {
       var ul = document.getElementById(g.listId);
       ul.replaceChildren();
-      var items = nodes.get({ filter: function (n) { return n.kind === g.kind && !n.start; } });
-      items.sort(function (a, b) {
-        return ((parseTime(a.time) || 0) - (parseTime(b.time) || 0)) || nodeName(a).localeCompare(nodeName(b));
-      });
+      var items = nodes.get({ filter: function (n) { return n.kind === g.kind && !n.start; } }).sort(byTimeThenName);
       if (!items.length) { ul.append(el('li', { class: 'empty-list', text: g.empty })); return; }
-      items.forEach(function (n) {
-        var box = el('input', { type: 'checkbox', dataset: { id: n.id } });
-        box.checked = obtained.has(n.id);
-        var a = ACT_STYLE[actOf(n)];
-        var chip = el('span', { class: 'chip', text: a.name });
-        chip.style.background = rgba(a.color, 0.2);
-        chip.style.boxShadow = 'inset 0 0 0 1.5px ' + a.color;
-        var loc = tidyLoc(n.location);
-        ul.append(el('li', {},
-          el('label', { class: 'chk' }, box,
-            el('span', { class: 'chk-main' },
-              el('span', { class: 'chk-name', text: nodeName(n) }),
-              loc ? el('span', { class: 'chk-loc', text: loc }) : null),
-            chip,
-            el('i', { class: 'dot', dataset: { id: n.id }, title: 'Glows when this node is currently available' }))));
-      });
+      items.forEach(function (n) { ul.append(checklistItem(n, 'kept')); });
     });
+
+    dom.listLoop.replaceChildren();
+    var loopItems = nodes.get({ filter: function (n) { return sources.has(n.id); } }).sort(byTimeThenName);
+    if (!loopItems.length) dom.listLoop.append(el('li', { class: 'empty-list', text: 'No Mechanical Prerequisite arrows yet.' }));
+    loopItems.forEach(function (n) { dom.listLoop.append(checklistItem(n, 'loop')); });
+
+    syncActPick();
     dom.simTime.value = simTime;
     dom.simTimeOut.textContent = fmtTime(simTime);
   }
@@ -1772,22 +2027,46 @@
   }
 
   function syncChecks() {
-    dom.simPanel.querySelectorAll('input[type=checkbox]').forEach(function (b) { b.checked = obtained.has(b.dataset.id); });
+    dom.simPanel.querySelectorAll('input[type=checkbox]').forEach(function (b) {
+      b.checked = (b.dataset.set === 'loop' ? doneNow : obtained).has(b.dataset.id);
+    });
   }
+
+  // "Player is in": Act 1 / Act 2 / Act 3. An Act is a requirement, so being in a later Act keeps earlier ones available.
+  ['Act 1', 'Act 2', 'Act 3'].forEach(function (a) {
+    var input = el('input', { type: 'radio', name: 'simact', value: a });
+    var label = el('span', {}, actBadge(a, 18), a);
+    label.style.setProperty('--c', ACT_STYLE[a].color);
+    dom.actPick.append(el('label', {}, input, label));
+  });
+  function syncActPick() {
+    dom.actPick.querySelectorAll('input').forEach(function (r) { r.checked = r.value === simAct; });
+  }
+  dom.actPick.addEventListener('change', function (ev) {
+    if (ev.target.name !== 'simact') return;
+    simAct = ev.target.value;
+    restyleAll();
+  });
 
   dom.simPanel.addEventListener('change', function (ev) {
     var box = ev.target;
     if (!box.matches || !box.matches('input[type=checkbox]')) return;
-    if (box.checked) obtained.add(box.dataset.id); else obtained.delete(box.dataset.id);
+    var set = box.dataset.set === 'loop' ? doneNow : obtained;
+    if (box.checked) set.add(box.dataset.id); else set.delete(box.dataset.id);
     restyleAll();
   });
   dom.simPanel.addEventListener('click', function (ev) {
     var b = ev.target.closest && ev.target.closest('button[data-group]');
     if (!b) return;
-    nodes.forEach(function (n) {
-      if (n.kind !== b.dataset.group || n.start) return;
-      if (b.dataset.all === '1') obtained.add(n.id); else obtained.delete(n.id);
-    });
+    var on = b.dataset.all === '1';
+    if (b.dataset.group === 'loop') {
+      loopSources().forEach(function (id) { if (on) doneNow.add(id); else doneNow.delete(id); });
+    } else {
+      nodes.forEach(function (n) {
+        if (n.kind !== b.dataset.group || n.start) return;
+        if (on) obtained.add(n.id); else obtained.delete(n.id);
+      });
+    }
     syncChecks();
     restyleAll();
   });
@@ -1797,9 +2076,17 @@
     dom.simTime.setAttribute('aria-valuetext', fmtTime(simTime));
     restyleAll();
   });
-  dom.simReset.addEventListener('click', function () {
-    obtained.clear(); simTime = 0;
+  // A new loop wipes what only lasts one loop (the clock and "Done this loop"); the Act, knowledge and unlocks stay.
+  dom.simNewLoop.addEventListener('click', function () {
+    doneNow.clear(); simTime = 0;
     dom.simTime.value = 0; dom.simTimeOut.textContent = '0:00';
+    syncChecks();
+    restyleAll();
+  });
+  dom.simReset.addEventListener('click', function () {
+    obtained.clear(); doneNow.clear(); simTime = 0; simAct = 'Act 1';
+    dom.simTime.value = 0; dom.simTimeOut.textContent = '0:00';
+    syncActPick();
     syncChecks();
     restyleAll();
   });
@@ -1858,16 +2145,25 @@
                 n.time ? 'from ' + n.time : 'no time requirement'].join(' · ');
     var kids = [el('b', { text: nodeName(n) }), el('div', { class: 'meta', text: meta })];
     if (text) kids.push(el('div', { class: 'body', text: text }));
+    if ((n.needs || []).length) {
+      kids.push(el('div', { class: 'meta', text: 'Requires permanent unlock: ' + n.needs.map(function (u) { return nodeName(nodes.get(u)); }).join(', ') }));
+    }
     var ev = mode === 'sim' ? lastEval.get(id) : null;
     if (ev) {
       var status = el('div', { class: 'status ' + (ev.available ? 'ok' : 'no'), text: ev.available ? 'Available now' : 'Locked' });
       if (!ev.available) {
         var ul = el('ul');
+        if (!ev.actOk) ul.append(el('li', { text: 'Needs ' + ACT_STYLE[actOf(n)].name + ' (the player is in ' + simAct + ')' }));
         if (!ev.timeOk) ul.append(el('li', { text: 'Needs time ≥ ' + fmtTime(ev.need) + ' (now ' + fmtTime(simTime) + ')' }));
         ev.missing.forEach(function (e) {
           var src = nodes.get(e.from);
-          var what = e.kind === 'Knowledge Prerequisite' ? 'knowledge' : 'unlock';
-          ul.append(el('li', { text: 'Needs ' + what + ': ' + nodeName(src) + (src && src.kind === 'Interaction' ? ' (an Interaction, so it can’t be obtained)' : '') }));
+          ul.append(el('li', { text: 'Needs knowledge: ' + nodeName(src) + (src && src.kind !== 'Knowledge Gain' ? ' (not a Knowledge Gain node, so it can’t be obtained)' : '') }));
+        });
+        ev.missingLoop.forEach(function (e) {
+          ul.append(el('li', { text: 'Needs done this loop: ' + nodeName(nodes.get(e.from)) }));
+        });
+        ev.missingUnlocks.forEach(function (id) {
+          ul.append(el('li', { text: 'Needs permanent unlock: ' + nodeName(nodes.get(id)) }));
         });
         status.append(ul);
       }
@@ -1905,12 +2201,15 @@
       return ul;
     }
     var nodesUl = section('Nodes');
-    Object.keys(NODE_TYPES).forEach(function (k) { nodesUl.append(row(nodeSample(k), k)); });
+    var typeNote = { 'Permanent Unlock': 'Permanent Unlock (obtaining one)', 'Knowledge Gain': 'Knowledge Gain (kept between loops)' };
+    Object.keys(NODE_TYPES).forEach(function (k) { nodesUl.append(row(nodeSample(k), typeNote[k] || k)); });
     nodesUl.append(row(startSample(), 'Start (where every node comes from)'));
+    nodesUl.append(row(lockSample(), 'Requires permanent unlock(s)'));
     nodesUl.append(row(orphanSample(), 'Not connected to Start', 'edit-only'));
 
     var arrowsUl = section('Arrows');
-    Object.keys(EDGE_TYPES).forEach(function (k) { arrowsUl.append(row(edgeSample(k, 40), k)); });
+    var arrowNote = { 'Cause-Effect': 'Cause-Effect (default flow)', 'Knowledge Prerequisite': 'Knowledge Prerequisite', 'Mechanical Prerequisite': 'Mechanical Prerequisite (this loop)' };
+    Object.keys(EDGE_TYPES).forEach(function (k) { arrowsUl.append(row(edgeSample(k, 40), arrowNote[k] || k)); });
     arrowsUl.append(row(el('i', { class: 'dot on' }), 'Glowing = available now', 'sim-only'));
     arrowsUl.append(row(el('i', { class: 'dot' }), 'Faded = locked', 'sim-only'));
 
@@ -2032,7 +2331,7 @@
   // Handy for poking at the data from the browser console.
   window.ClockRushMap = {
     nodes: nodes, edges: edges, network: network, evaluate: evaluate, serialize: serialize,
-    arrange: arrange, computeLayout: computeLayout, getView: function () { return view; }
+    arrange: arrange, computeLayout: computeLayout, overlayShapes: overlayShapes, getView: function () { return view; }
   };
 })();
 </script>
