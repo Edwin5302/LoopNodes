@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClockRush Loop Map</title>
+
+<!-- vis-network (standalone build: no other dependencies). jsDelivr first, unpkg as a fallback. -->
+<script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<script>window.vis || document.write('<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"><\/script>');</script>
+
+<style>
+  :root {
+    --bg: #eef0f5;
+    --panel: #ffffff;
+    --ink: #1b2130;
+    --muted: #667085;
+    --line: #dfe3ec;
+    --accent: #4f46e5;
+    --sim: #047857;
+    --glow: #f5a000;
+    --danger: #c2362b;
+    --warn-bg: #fff4d6;
+    --warn-ink: #7a4b00;
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 6px 18px rgba(16, 24, 40, .10);
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--ink);
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  h2 { margin: 0; font-size: 13px; letter-spacing: .02em; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- top bar ---------- */
+  .topbar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    padding: 10px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    z-index: 5;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .brand svg { width: 28px; height: 28px; color: var(--accent); }
+  .brand strong { display: block; font-size: 16px; line-height: 1.1; }
+  .brand span { display: block; font-size: 11px; color: var(--muted); }
+  .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .toolbar .sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 36px; padding: 0 13px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: #fff; cursor: pointer; font-weight: 600; white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { background: #f6f7fb; border-color: #cfd4e0; }
+  .btn:focus-visible, .modeswitch input:focus-visible + span, .field :is(input, select, textarea):focus-visible,
+  input[type=range]:focus-visible, .chk input:focus-visible {
+    outline: 3px solid rgba(79, 70, 229, .35); outline-offset: 1px;
+  }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover:not(:disabled) { background: #4338ca; border-color: #4338ca; }
+  .btn[aria-pressed="true"] { background: #eceafd; border-color: var(--accent); color: #3730a3; }
+  .btn.danger { color: var(--danger); border-color: #efc4c0; }
+  .btn.danger:hover:not(:disabled) { background: #fdf0ef; border-color: var(--danger); }
+  .btn.small { height: 28px; padding: 0 10px; font-size: 12px; }
+
+  /* Edit / Simulation switch */
+  .modeswitch {
+    margin-left: auto;
+    display: inline-flex; padding: 4px; gap: 4px;
+    background: #e8eaf1; border-radius: 14px;
+  }
+  .modeswitch label { position: relative; cursor: pointer; }
+  .modeswitch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .modeswitch span {
+    display: flex; align-items: center; gap: 8px;
+    height: 42px; padding: 0 22px; border-radius: 10px;
+    font-size: 15px; font-weight: 700; color: #4b5468;
+    transition: background .15s, color .15s, box-shadow .15s;
+  }
+  .modeswitch input:checked + span { color: #fff; box-shadow: 0 2px 8px rgba(16, 24, 40, .25); }
+  .modeswitch input[value="edit"]:checked + span { background: var(--accent); }
+  .modeswitch input[value="sim"]:checked + span { background: var(--sim); }
+
+  /* ---------- workspace ---------- */
+  .workspace { flex: 1; min-height: 0; display: flex; position: relative; }
+  .stage { flex: 1; min-width: 0; position: relative; overflow: hidden;
+    background-color: #f8f9fc;
+    background-image: radial-gradient(#d3d8e4 1.1px, transparent 1.1px);
+    background-size: 22px 22px; }
+  #network { position: absolute; inset: 0; }
+  #network :focus { outline: none; }          /* vis-network focuses its canvas on click; no keyboard nav is used there */
+  .stage.linking #network { cursor: crosshair; }
+
+  .panel { flex: none; width: 330px; background: var(--panel); overflow-y: auto; padding: 16px; z-index: 4; }
+  .panel.left { border-right: 1px solid var(--line); }
+  .panel.right { border-left: 1px solid var(--line); width: 350px; }
+
+  .mode-chip {
+    position: absolute; top: 12px; left: 12px; z-index: 2; pointer-events: none;
+    padding: 6px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .02em;
+    background: rgba(255, 255, 255, .92); border: 1px solid var(--line); box-shadow: var(--shadow); color: #3730a3;
+  }
+  body[data-mode="sim"] .mode-chip { color: var(--sim); border-color: #a7dcc6; }
+
+  .empty-hint {
+    position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center;
+    pointer-events: none; text-align: center; color: var(--muted); padding: 24px;
+  }
+  .empty-hint div { max-width: 360px; }
+  .empty-hint strong { display: block; color: var(--ink); font-size: 16px; margin-bottom: 4px; }
+
+  .legend {
+    position: absolute; left: 12px; bottom: 12px; z-index: 2; font-size: 12px;
+    background: rgba(255, 255, 255, .94); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 8px 12px; max-width: 250px;
+  }
+  .legend summary { cursor: pointer; font-weight: 700; font-size: 12px; list-style-position: inside; }
+  .legend ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 5px; }
+  .legend li { display: flex; align-items: center; gap: 9px; }
+  .legend li svg { flex: none; }
+  .legend .rule { height: 1px; background: var(--line); margin: 3px 0; }
+  .legend .sim-only { display: none; }
+  body[data-mode="sim"] .legend .sim-only { display: flex; }
+
+  .zoom { position: absolute; right: 12px; bottom: 12px; z-index: 2; display: grid; gap: 6px; }
+  .zoom .btn { width: 36px; padding: 0; justify-content: center; box-shadow: var(--shadow); }
+
+  .tip {
+    position: absolute; z-index: 6; pointer-events: none; width: max-content; max-width: 290px;
+    background: #1f2433; color: #f4f6fb; border-radius: 9px; padding: 10px 12px; font-size: 12.5px;
+    box-shadow: 0 8px 24px rgba(16, 24, 40, .35);
+  }
+  .tip b { display: block; font-size: 13.5px; margin-bottom: 2px; }
+  .tip .meta { color: #aab3c8; font-size: 11.5px; margin-bottom: 6px; }
+  .tip .body { white-space: pre-wrap; overflow-wrap: anywhere; color: #e4e8f2; }
+  .tip .status { margin-top: 8px; padding-top: 7px; border-top: 1px solid #3a4157; font-weight: 700; }
+  .tip .status.ok { color: #ffd166; }
+  .tip .status.no { color: #ff9a8f; }
+  .tip ul { margin: 4px 0 0; padding-left: 16px; font-weight: 400; color: #e4e8f2; }
+
+  /* ---------- panels: shared form bits ---------- */
+  .panel-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .panel-head h2 { font-size: 15px; }
+  .field { display: block; margin-bottom: 14px; }
+  .field > span { display: block; font-size: 12px; font-weight: 700; color: #3b4458; margin-bottom: 5px; }
+  .field small { display: block; margin-top: 5px; color: var(--muted); font-size: 11.5px; }
+  .field small.bad { color: var(--danger); }
+  .field input[type=text], .field select, .field textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid #cdd3e0; border-radius: 8px; background: #fff;
+  }
+  .field textarea { resize: vertical; min-height: 150px; line-height: 1.5; }
+  .field input.invalid { border-color: var(--danger); background: #fff6f5; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .panel-foot { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .muted { color: var(--muted); }
+  .note { margin: 0 0 12px; font-size: 12.5px; }
+  .note.warn { background: var(--warn-bg); color: var(--warn-ink); padding: 8px 10px; border-radius: 8px; }
+  .edge-ends { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 14px; font-weight: 600; }
+  .edge-ends span.node { background: #eef0f6; border-radius: 6px; padding: 2px 8px; max-width: 100%; overflow-wrap: anywhere; }
+  .edge-preview { display: flex; align-items: center; gap: 10px; margin: -4px 0 8px; font-weight: 600; font-size: 12.5px; }
+
+  /* ---------- simulation panel ---------- */
+  .sim-block { margin-bottom: 20px; }
+  .sim-block > .group-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .clock { display: flex; align-items: baseline; gap: 8px; margin: 6px 0 4px; }
+  .clock output { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .clock span { color: var(--muted); font-weight: 600; }
+  input[type=range] { width: 100%; accent-color: var(--sim); margin: 4px 0 0; }
+  .ticks { display: flex; justify-content: space-between; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .group-actions { display: flex; gap: 4px; }
+  .checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .chk { display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: 8px; cursor: pointer; }
+  .chk:hover { background: #f3f5fa; }
+  .chk input { width: 17px; height: 17px; margin: 0; flex: none; accent-color: var(--sim); }
+  .chk-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .chip { flex: none; font-size: 10.5px; font-weight: 700; color: #4b5468; background: #eef0f6; border-radius: 999px; padding: 1px 8px; }
+  .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: #d4d8e2; }
+  .dot.on { background: var(--glow); box-shadow: 0 0 8px 2px rgba(245, 160, 0, .65); }
+  .empty-list { color: var(--muted); font-size: 12.5px; padding: 4px 8px; }
+  .summary { background: #f3f7f5; border: 1px solid #cfe6dc; border-radius: var(--radius); padding: 10px 12px; margin-bottom: 10px; font-weight: 700; color: var(--sim); }
+
+  /* ---------- toast / errors ---------- */
+  .toast {
+    position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 20;
+    display: flex; align-items: center; gap: 14px; max-width: min(92vw, 640px);
+    background: #1f2433; color: #fff; padding: 11px 16px; border-radius: 10px; box-shadow: 0 10px 30px rgba(16, 24, 40, .4);
+  }
+  .toast.error { background: #8f1f16; }
+  .toast button { border: 0; background: rgba(255, 255, 255, .16); color: #fff; font-weight: 700; padding: 5px 12px; border-radius: 7px; cursor: pointer; }
+  .toast button:hover { background: rgba(255, 255, 255, .28); }
+  #cdn-error {
+    position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px;
+    background: rgba(238, 240, 245, .96); text-align: center;
+  }
+  #cdn-error div { max-width: 460px; background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 24px; box-shadow: var(--shadow); }
+
+  /* ---------- narrow screens: panels become bottom sheets ---------- */
+  @media (max-width: 820px) {
+    .modeswitch { margin-left: 0; width: 100%; }
+    .modeswitch label { flex: 1; }
+    .modeswitch span { justify-content: center; padding: 0 8px; }
+    .panel, .panel.right {
+      position: absolute; left: 0; right: 0; bottom: 0; top: auto; width: auto;
+      border: 0; border-top: 1px solid var(--line); box-shadow: 0 -8px 24px rgba(16, 24, 40, .14);
+    }
+    .toolbar .btn .lbl, .toolbar .sep { display: none; }
+    .toolbar .btn { width: 40px; padding: 0; justify-content: center; }
+    .panel, .panel.right { max-height: 42%; }
+    .mode-chip, .legend { display: none; }
+    .zoom { bottom: auto; top: 12px; }
+  }
+</style>
+</head>
+<body data-mode="edit">
+
+<!-- icon sprite -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><polygon points="6 4 20 12 6 20 6 4"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></symbol>
+  <symbol id="i-swap" viewBox="0 0 24 24"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="i" style="stroke-width:1.8"><use href="#i-clock"/></svg>
+    <div><strong>ClockRush</strong><span>Loop Map</span></div>
+  </div>
+
+  <div class="toolbar" role="toolbar" aria-label="Map tools">
+    <button class="btn primary" id="btn-add-node" aria-label="Add Node" title="Add a node at the centre of the view"><svg class="i"><use href="#i-plus"/></svg><span class="lbl">Add Node</span></button>
+    <button class="btn" id="btn-add-edge" aria-pressed="false" aria-label="Add Edge" title="Then drag from one node to another"><svg class="i"><use href="#i-link"/></svg><span class="lbl">Add Edge</span></button>
+    <span class="sep" aria-hidden="true"></span>
+    <button class="btn" id="btn-export" aria-label="Export JSON" title="Download the map as JSON"><svg class="i"><use href="#i-download"/></svg><span class="lbl">Export JSON</span></button>
+    <button class="btn" id="btn-import" aria-label="Import JSON" title="Replace the map with a JSON file"><svg class="i"><use href="#i-upload"/></svg><span class="lbl">Import JSON</span></button>
+    <button class="btn" id="btn-clear" aria-label="Clear" title="Remove every node and edge (can be undone right after)"><svg class="i"><use href="#i-trash"/></svg><span class="lbl">Clear</span></button>
+    <input type="file" id="file-import" accept=".json,application/json" hidden>
+  </div>
+
+  <div class="modeswitch" role="radiogroup" aria-label="Mode">
+    <label><input type="radio" name="mode" value="edit" checked><span><svg class="i"><use href="#i-pencil"/></svg>Edit Mode</span></label>
+    <label><input type="radio" name="mode" value="sim"><span><svg class="i"><use href="#i-play"/></svg>Simulation Mode</span></label>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- LEFT: simulation controls -->
+  <aside class="panel left" id="sim-panel" aria-label="Simulation controls" hidden>
+    <section class="sim-block">
+      <h2>Time Passed in Loop</h2>
+      <div class="clock"><output id="sim-time-out" for="sim-time">0:00</output><span>/ 7:00</span></div>
+      <input type="range" id="sim-time" min="0" max="420" step="1" value="0" aria-label="Time passed in loop">
+      <div class="ticks" aria-hidden="true"><span>0:00</span><span>1:00</span><span>2:00</span><span>3:00</span><span>4:00</span><span>5:00</span><span>6:00</span><span>7:00</span></div>
+    </section>
+
+    <section class="sim-block">
+      <div class="group-head"><h2>Knowledge</h2>
+        <span class="group-actions"><button class="btn small" data-group="Knowledge Gain" data-all="1">All</button><button class="btn small" data-group="Knowledge Gain" data-all="0">None</button></span></div>
+      <ul class="checklist" id="list-knowledge"></ul>
+    </section>
+
+    <section class="sim-block">
+      <div class="group-head"><h2>Permanent Unlocks</h2>
+        <span class="group-actions"><button class="btn small" data-group="Permanent Unlock" data-all="1">All</button><button class="btn small" data-group="Permanent Unlock" data-all="0">None</button></span></div>
+      <ul class="checklist" id="list-unlocks"></ul>
+    </section>
+
+    <div class="summary" id="sim-summary" aria-live="polite"></div>
+    <button class="btn" id="sim-reset">Reset simulation</button>
+  </aside>
+
+  <!-- CENTRE: graph canvas -->
+  <main class="stage" id="stage">
+    <div id="network" aria-label="Node graph canvas"></div>
+    <div class="mode-chip" id="mode-chip"></div>
+    <div class="empty-hint" id="empty-hint" hidden>
+      <div><strong>Nothing mapped yet</strong>Use <b>Add Node</b> to place your first beat, then <b>Add Edge</b> to connect beats together. Or import a JSON file.</div>
+    </div>
+    <details class="legend" id="legend" open>
+      <summary>Legend</summary>
+      <ul id="legend-list"></ul>
+    </details>
+    <div class="zoom">
+      <button class="btn" id="zoom-in" aria-label="Zoom in" title="Zoom in"><svg class="i"><use href="#i-plus"/></svg></button>
+      <button class="btn" id="zoom-out" aria-label="Zoom out" title="Zoom out"><svg class="i"><use href="#i-minus"/></svg></button>
+      <button class="btn" id="zoom-fit" aria-label="Fit graph to view" title="Fit graph to view"><svg class="i"><use href="#i-fit"/></svg></button>
+    </div>
+    <div class="tip" id="tip" hidden></div>
+  </main>
+
+  <!-- RIGHT: property editor (Edit Mode) -->
+  <aside class="panel right" id="edit-panel" aria-label="Properties" hidden>
+    <form id="node-form" autocomplete="off" hidden>
+      <div class="panel-head"><span id="node-badge"></span><h2>NODE</h2></div>
+      <label class="field"><span>Title</span><input type="text" id="f-title" maxlength="80" placeholder="Short name"></label>
+      <div class="row2">
+        <label class="field"><span>Type</span><select id="f-type"></select></label>
+        <label class="field"><span>Act</span><select id="f-act"></select></label>
+      </div>
+      <label class="field"><span>Time Requirement</span>
+        <input type="text" id="f-time" inputmode="numeric" maxlength="5" placeholder="0:15" aria-describedby="f-time-hint">
+        <small id="f-time-hint">M:SS (max 7:00). Earliest moment in the loop this can happen. Blank = no requirement.</small>
+      </label>
+      <label class="field"><span>Text</span><textarea id="f-text" placeholder="Dialogue / description"></textarea></label>
+      <div class="panel-foot"><button type="button" class="btn danger" id="btn-del-node"><svg class="i"><use href="#i-trash"/></svg>Delete node</button></div>
+    </form>
+
+    <form id="edge-form" autocomplete="off" hidden>
+      <div class="panel-head"><h2>EDGE</h2></div>
+      <div class="edge-ends"><span class="node" id="e-from"></span><span aria-label="to">→</span><span class="node" id="e-to"></span></div>
+      <label class="field"><span>Type</span><select id="e-type"></select></label>
+      <div class="edge-preview" id="e-preview"></div>
+      <p class="note muted" id="e-desc"></p>
+      <p class="note warn" id="e-warn" hidden></p>
+      <div class="panel-foot">
+        <button type="button" class="btn" id="btn-swap-edge"><svg class="i"><use href="#i-swap"/></svg>Swap direction</button>
+        <button type="button" class="btn danger" id="btn-del-edge"><svg class="i"><use href="#i-trash"/></svg>Delete edge</button>
+      </div>
+    </form>
+  </aside>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<div id="cdn-error" hidden>
+  <div>
+    <h2 style="font-size:17px;margin-bottom:8px">Couldn’t load the graph library</h2>
+    <p class="muted" style="margin:0">This page loads <code>vis-network</code> from a CDN (jsDelivr / unpkg). Check your internet connection or content blocker, then reload.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  if (typeof vis === 'undefined' || !vis.Network) {
+    document.getElementById('cdn-error').hidden = false;
+    return;
+  }
+
+  /* =====================================================================
+     CONFIG
+     ===================================================================== */
+  var MAX_TIME = 7 * 60;                      // slider range, in seconds
+  var STORAGE_KEY = 'clockrush-loop-map-v1';
+  var FORMAT = 'clockrush-loop-map';
+  var ACTS = ['Act 1', 'Act 2', 'Act 3', 'Any'];
+  var FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+  var INK = '#1b2130', SUB_INK = '#566074';
+  var SELECT_COLOR = '#4f46e5', GLOW_COLOR = '#f5a000';
+  var DIM = 0.3, EDGE_DIM = 0.22;
+
+  var NODE_TYPES = {
+    // Same footprint for every type; the corner radius is a second, colour-independent cue.
+    'Interaction':      { radius: 9,  borderWidth: 2, bg: '#c4ebd0', hover: '#d8f4e1', border: '#2e9d5b' },   // rounded
+    'Knowledge Gain':   { radius: 28, borderWidth: 2, bg: '#c3dafb', hover: '#d9e8fd', border: '#2f6fd8' },   // pill
+    'Permanent Unlock': { radius: 0,  borderWidth: 3, bg: '#f8c7c2', hover: '#fcdad7', border: '#cf3a2f' }    // sharp, heavier border
+  };
+  var DEFAULT_NODE_TYPE = 'Interaction';
+
+  var EDGE_TYPES = {
+    'Cause-Effect': {
+      color: '#000000', width: 2, dashes: false, arrow: 1, prereq: false,
+      desc: 'The source leads to the target. Informational only: it does not gate availability in Simulation Mode.'
+    },
+    'Knowledge Prerequisite': {
+      color: '#1f6feb', width: 2.5, dashes: [9, 6], arrow: 1, prereq: true,
+      desc: 'The target requires the knowledge gained from the source node. Met when the source is ticked as obtained in Simulation Mode.'
+    },
+    'Mechanical Prerequisite': {
+      color: '#d92d20', width: 6, dashes: false, arrow: 0.7, prereq: true,
+      desc: 'The target requires the permanent item / unlock from the source node. Met when the source is ticked as obtained in Simulation Mode.'
+    }
+  };
+  var DEFAULT_EDGE_TYPE = 'Cause-Effect';
+
+  // Left-sidebar checklists: one checkbox per node of the given type.
+  var GROUPS = [
+    { kind: 'Knowledge Gain',   listId: 'list-knowledge', empty: 'No Knowledge Gain nodes yet.' },
+    { kind: 'Permanent Unlock', listId: 'list-unlocks',   empty: 'No Permanent Unlock nodes yet.' }
+  ];
+
+  /* =====================================================================
+     SMALL HELPERS
+     ===================================================================== */
+  function $(sel) { return document.querySelector(sel); }
+
+  function el(tag, props) {
+    var node = document.createElement(tag);
+    props = props || {};
+    Object.keys(props).forEach(function (k) {
+      var v = props[k];
+      if (k === 'class') node.className = v;
+      else if (k === 'text') node.textContent = v;
+      else if (k === 'dataset') Object.assign(node.dataset, v);
+      else if (k.slice(0, 2) === 'on') node.addEventListener(k.slice(2), v);
+      else node.setAttribute(k, v);
+    });
+    for (var i = 2; i < arguments.length; i++) if (arguments[i]) node.append(arguments[i]);
+    return node;
+  }
+
+  function svgEl(tag, attrs) {
+    var n = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+    return n;
+  }
+
+  function fmtTime(sec) {
+    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  }
+
+  // "M:SS" -> seconds. Blank -> 0 (no requirement). Anything else -> null (invalid).
+  function parseTime(str) {
+    var s = String(str == null ? '' : str).trim();
+    if (s === '') return 0;
+    var m = /^(\d{1,2}):([0-5]\d)$/.exec(s);
+    return m ? (+m[1]) * 60 + (+m[2]) : null;
+  }
+
+  function rgba(hex, a) {
+    var n = parseInt(hex.slice(1), 16);
+    return 'rgba(' + (n >> 16) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+
+  // vis-network "html" labels recognise only the exact tags <b> <i> <code> and their closers (its &lt;/&amp;
+  // decoding is broken in 9.1.9). A zero-width space after every "<" stops user text from forming a tag,
+  // so a title is always drawn exactly as typed.
+  function plainForLabel(s) {
+    return String(s).replace(/</g, '<\u200b');
+  }
+
+  function simplify(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]/g, ''); }
+
+  function nodeName(n) { return (n && n.name && n.name.trim()) || '(untitled)'; }
+
+  function isNumber(v) { return typeof v === 'number' && isFinite(v); }
+
+  /* ----- tiny SVG samples used by the legend and panels ----- */
+  function nodeSample(kind) {
+    var t = NODE_TYPES[kind] || NODE_TYPES[DEFAULT_NODE_TYPE];
+    var svg = svgEl('svg', { width: 30, height: 20, viewBox: '0 0 30 20', 'aria-hidden': 'true' });
+    svg.append(svgEl('rect', {
+      x: 2, y: 3, width: 26, height: 14, rx: Math.min(t.radius / 3, 7),
+      fill: t.bg, stroke: t.border, 'stroke-width': t.borderWidth
+    }));
+    return svg;
+  }
+
+  function edgeSample(kind, width) {
+    var t = EDGE_TYPES[kind] || EDGE_TYPES[DEFAULT_EDGE_TYPE];
+    width = width || 54;
+    var svg = svgEl('svg', { width: width, height: 20, viewBox: '0 0 ' + width + ' 20', 'aria-hidden': 'true' });
+    var head = 5 + t.width * 1.4 * t.arrow + 3;
+    var line = svgEl('line', { x1: 2, y1: 10, x2: width - head, y2: 10, stroke: t.color, 'stroke-width': t.width });
+    if (t.dashes) line.setAttribute('stroke-dasharray', t.dashes.join(' '));
+    svg.append(line);
+    svg.append(svgEl('polygon', {
+      points: (width - 2) + ',10 ' + (width - 2 - head) + ',' + (10 - head / 2.2) + ' ' + (width - 2 - head) + ',' + (10 + head / 2.2),
+      fill: t.color
+    }));
+    return svg;
+  }
+
+  /* =====================================================================
+     DOM REFERENCES
+     ===================================================================== */
+  var dom = {
+    stage: $('#stage'), canvas: $('#network'), chip: $('#mode-chip'), emptyHint: $('#empty-hint'),
+    tip: $('#tip'), toast: $('#toast'),
+    simPanel: $('#sim-panel'), editPanel: $('#edit-panel'),
+    btnAddNode: $('#btn-add-node'), btnAddEdge: $('#btn-add-edge'), btnExport: $('#btn-export'),
+    btnImport: $('#btn-import'), btnClear: $('#btn-clear'), fileImport: $('#file-import'),
+    nodeForm: $('#node-form'), edgeForm: $('#edge-form'),
+    fTitle: $('#f-title'), fType: $('#f-type'), fAct: $('#f-act'), fTime: $('#f-time'), fTimeHint: $('#f-time-hint'),
+    fText: $('#f-text'), nodeBadge: $('#node-badge'),
+    eFrom: $('#e-from'), eTo: $('#e-to'), eType: $('#e-type'), ePreview: $('#e-preview'), eDesc: $('#e-desc'), eWarn: $('#e-warn'),
+    simTime: $('#sim-time'), simTimeOut: $('#sim-time-out'), simSummary: $('#sim-summary'), simReset: $('#sim-reset')
+  };
+
+  /* =====================================================================
+     STATE
+     Node items live in a vis DataSet. Domain fields: name, kind, act, time, text.
+     Everything visual (label, colours, opacity, glow...) is derived from them
+     in restyleAll(), so the picture can never drift from the data.
+     ===================================================================== */
+  var nodes = new vis.DataSet();
+  var edges = new vis.DataSet();
+  var network = null;
+
+  var mode = 'edit';                 // 'edit' | 'sim'
+  var linking = false;               // Add Edge mode armed
+  var simTime = 0;                   // seconds
+  var obtained = new Set();          // ids of Knowledge / Permanent nodes ticked in Simulation Mode
+  var selSig = '';                   // 'n:<id>' | 'e:<id>' | '' - what the right panel is showing
+  var lastEval = new Map();          // node id -> evaluation (Simulation Mode)
+  var nodeSeq = 0, edgeSeq = 0;
+  var styleCache = new Map();        // id -> JSON of the last style pushed to vis
+
+  /* =====================================================================
+     SIMULATION LOGIC
+     A node is Available when
+       time requirement <= slider   AND
+       every inbound Knowledge/Mechanical prerequisite edge has an obtained source.
+     ===================================================================== */
+  function evaluate() {
+    var inbound = new Map();
+    edges.forEach(function (e) {
+      var t = EDGE_TYPES[e.kind];
+      if (t && t.prereq) {
+        if (!inbound.has(e.to)) inbound.set(e.to, []);
+        inbound.get(e.to).push(e);
+      }
+    });
+    var result = new Map();
+    nodes.forEach(function (n) {
+      var need = parseTime(n.time) || 0;
+      var timeOk = need <= simTime;
+      var missing = (inbound.get(n.id) || []).filter(function (e) { return !obtained.has(e.from); });
+      result.set(n.id, { need: need, timeOk: timeOk, missing: missing, available: timeOk && missing.length === 0 });
+    });
+    return result;
+  }
+
+  /* =====================================================================
+     STYLING  (data -> vis options)
+     ===================================================================== */
+  var GLOW = { enabled: true, color: 'rgba(255,176,0,0.95)', size: 26, x: 0, y: 0 };
+  var NO_GLOW = { enabled: false, color: 'rgba(0,0,0,0.5)', size: 10, x: 5, y: 5 };
+
+  function nodeLabel(n) {
+    var info = (n.act === 'Any' ? 'Any act' : n.act) + (n.time ? ' · ' + n.time : '');
+    return '<b>' + plainForLabel(nodeName(n)) + '</b>\n<i>' + plainForLabel(info) + '</i>';
+  }
+
+  function nodeStyle(n) {
+    var t = NODE_TYPES[n.kind] || NODE_TYPES[DEFAULT_NODE_TYPE];
+    var sim = mode === 'sim';
+    var ev = sim ? lastEval.get(n.id) : null;
+    var available = !!(ev && ev.available);
+    var dimmed = sim && !available;
+    var main = dimmed ? rgba(INK, DIM) : INK;
+    var sub = dimmed ? rgba(SUB_INK, DIM) : SUB_INK;
+    var border = available ? GLOW_COLOR : t.border;
+    return {
+      id: n.id,
+      label: nodeLabel(n),
+      shape: 'box',
+      shapeProperties: { borderRadius: t.radius },
+      opacity: dimmed ? DIM : 1,
+      borderWidth: available ? 4 : t.borderWidth,
+      shadow: available ? GLOW : NO_GLOW,
+      color: {
+        background: t.bg, border: border,
+        highlight: { background: t.bg, border: SELECT_COLOR },
+        hover: { background: t.hover, border: border }
+      },
+      font: {
+        multi: 'html', face: FONT, size: 15, color: main,
+        bold: { face: FONT, size: 15, color: main, mod: 'bold' },
+        ital: { face: FONT, size: 12, color: sub, mod: '' }
+      }
+    };
+  }
+
+  // Parallel edges between the same two nodes would sit on top of each other: curve them apart.
+  function parallelRoundness() {
+    var groups = new Map();
+    edges.forEach(function (e) {
+      var key = e.from < e.to ? e.from + '|' + e.to : e.to + '|' + e.from;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    });
+    var out = new Map();
+    groups.forEach(function (list) {
+      if (list.length < 2) return;
+      var rank = {};
+      list.forEach(function (e) {
+        var dir = e.from + '>' + e.to;
+        rank[dir] = rank[dir] || 0;
+        out.set(e.id, 0.18 + 0.24 * rank[dir]++);
+      });
+    });
+    return out;
+  }
+
+  function edgeStyle(e, roundness) {
+    var t = EDGE_TYPES[e.kind] || EDGE_TYPES[DEFAULT_EDGE_TYPE];
+    var opacity = 1;
+    if (mode === 'sim') {
+      if (t.prereq) {
+        opacity = obtained.has(e.from) ? 1 : EDGE_DIM;                       // met vs. unmet prerequisite
+      } else {
+        var a = lastEval.get(e.from), b = lastEval.get(e.to);
+        opacity = a && b && a.available && b.available ? 1 : EDGE_DIM;
+      }
+    }
+    return {
+      id: e.id,
+      width: t.width,
+      dashes: t.dashes,
+      arrows: { to: { enabled: true, type: 'arrow', scaleFactor: t.arrow } },
+      color: { color: t.color, highlight: t.color, hover: t.color, inherit: false, opacity: opacity },
+      smooth: roundness === undefined
+        ? { enabled: false, type: 'continuous', roundness: 0.5 }
+        : { enabled: true, type: 'curvedCW', roundness: roundness }
+    };
+  }
+
+  function pushChanged(dataset, items, prefix) {
+    var changed = [];
+    items.forEach(function (it) {
+      var sig = JSON.stringify(it);
+      if (styleCache.get(prefix + it.id) !== sig) { styleCache.set(prefix + it.id, sig); changed.push(it); }
+    });
+    if (changed.length) dataset.update(changed);
+  }
+
+  // The single place that decides what the graph looks like.
+  function restyleAll() {
+    lastEval = mode === 'sim' ? evaluate() : new Map();
+    var nodeItems = [], edgeItems = [];
+    nodes.forEach(function (n) { nodeItems.push(nodeStyle(n)); });
+    var round = parallelRoundness();
+    edges.forEach(function (e) { edgeItems.push(edgeStyle(e, round.get(e.id))); });
+    pushChanged(nodes, nodeItems, 'n');
+    pushChanged(edges, edgeItems, 'e');
+    dom.emptyHint.hidden = nodes.length > 0;
+    if (mode === 'sim') updateSimStatus();
+  }
+
+  /* =====================================================================
+     NETWORK
+     ===================================================================== */
+  network = new vis.Network(dom.canvas, { nodes: nodes, edges: edges }, {
+    autoResize: true,
+    physics: false,
+    layout: { improvedLayout: false },
+    interaction: {
+      hover: true, multiselect: true, selectConnectedEdges: false,
+      dragNodes: true, dragView: true, zoomView: true
+    },
+    nodes: {
+      margin: 11, borderWidthSelected: 4,
+      widthConstraint: { minimum: 110, maximum: 190 }
+    },
+    edges: {
+      selectionWidth: 0, hoverWidth: 0, smooth: false,
+      chosen: {
+        edge: function (values, id, selected, hovering) {
+          if (selected) {
+            values.width += 2; values.shadow = true;
+            values.shadowColor = 'rgba(79,70,229,0.55)'; values.shadowSize = 14; values.shadowX = 0; values.shadowY = 0;
+          } else if (hovering) {
+            values.width += 1;
+          }
+        }
+      }
+    },
+    // Native edge creation: network.addEdgeMode() lets the user drag from one node to another,
+    // then vis-network calls addEdge() below with {from, to}.
+    manipulation: {
+      enabled: false,
+      addEdge: function (data, callback) {
+        if (data.from === data.to) { toast('A node can’t link to itself.', { kind: 'warn' }); return; }
+        var dup = edges.get({ filter: function (e) { return e.from === data.from && e.to === data.to && e.kind === DEFAULT_EDGE_TYPE; } });
+        if (dup.length) { toast('Those nodes are already linked. Change that edge’s type to add another.', { kind: 'warn' }); return; }
+        var id = 'e' + (++edgeSeq);
+        callback({ id: id, from: data.from, to: data.to, kind: DEFAULT_EDGE_TYPE });
+        setTimeout(function () {
+          setLinkMode(false);
+          restyleAll();
+          network.selectEdges([id]);
+          syncSelection();
+          saveSoon();
+        }, 0);
+      }
+    }
+  });
+
+  /* =====================================================================
+     SERIALISATION  (export / import / autosave)
+     ===================================================================== */
+  function serialize() {
+    var pos = network.getPositions();
+    return {
+      format: FORMAT,
+      version: 1,
+      nodes: nodes.get().map(function (n) {
+        var p = pos[n.id] || n;
+        return { id: n.id, title: n.name, type: n.kind, act: n.act, time: n.time, text: n.text,
+                 x: Math.round(p.x || 0), y: Math.round(p.y || 0) };
+      }),
+      edges: edges.get().map(function (e) { return { id: e.id, from: e.from, to: e.to, type: e.kind }; })
+    };
+  }
+
+  function lookup(map, value, fallback) {
+    var hit = map[simplify(value)];
+    return hit === undefined ? fallback : hit;
+  }
+  var NODE_ALIASES = {
+    interaction: 'Interaction',
+    knowledgegain: 'Knowledge Gain', knowledge: 'Knowledge Gain',
+    permanentunlock: 'Permanent Unlock', permanent: 'Permanent Unlock', unlock: 'Permanent Unlock', mechanical: 'Permanent Unlock'
+  };
+  var EDGE_ALIASES = {
+    causeeffect: 'Cause-Effect', cause: 'Cause-Effect', default: 'Cause-Effect',
+    knowledgeprerequisite: 'Knowledge Prerequisite', knowledgeprereq: 'Knowledge Prerequisite', knowledge: 'Knowledge Prerequisite',
+    mechanicalprerequisite: 'Mechanical Prerequisite', mechanicalprereq: 'Mechanical Prerequisite', mechanical: 'Mechanical Prerequisite'
+  };
+  var ACT_ALIASES = { act1: 'Act 1', '1': 'Act 1', act2: 'Act 2', '2': 'Act 2', act3: 'Act 3', '3': 'Act 3', any: 'Any', all: 'Any' };
+
+  // Turn arbitrary parsed JSON into a clean state object (or throw a readable error).
+  function normalizeImport(raw) {
+    if (!raw || typeof raw !== 'object' || !Array.isArray(raw.nodes)) {
+      throw new Error('expected an object with a “nodes” array.');
+    }
+    var warnings = [];
+    var used = new Set(), idMap = new Map(), seq = 0;
+    function freshId() { var id; do { id = 'n' + (++seq); } while (used.has(id)); return id; }
+
+    var badEnum = 0, badTime = 0, dupIds = 0;
+    var list = raw.nodes.filter(function (n) { return n && typeof n === 'object'; }).map(function (n) {
+      var id = n.id == null ? '' : String(n.id);
+      if (!id || used.has(id)) { if (id) dupIds++; id = freshId(); }
+      used.add(id);
+      if (n.id != null && !idMap.has(String(n.id))) idMap.set(String(n.id), id);
+
+      var kind = lookup(NODE_ALIASES, n.type != null ? n.type : n.kind, null);
+      if (!kind) { kind = DEFAULT_NODE_TYPE; if (n.type != null || n.kind != null) badEnum++; }
+      var act = lookup(ACT_ALIASES, n.act, null);
+      if (!act) { act = 'Any'; if (n.act != null && n.act !== '') badEnum++; }
+      var secs = parseTime(n.time == null ? '' : String(n.time));
+      if (secs === null) { badTime++; secs = 0; }
+      var title = n.title != null ? n.title : (n.name != null ? n.name : n.label);
+      var text = n.text != null ? n.text : (n.description != null ? n.description : n.dialogue);
+      return {
+        id: id, title: title == null ? '' : String(title), type: kind, act: act,
+        time: n.time == null || String(n.time).trim() === '' ? '' : fmtTime(secs),
+        text: text == null ? '' : String(text),
+        x: isNumber(n.x) ? n.x : null, y: isNumber(n.y) ? n.y : null
+      };
+    });
+
+    var edgeList = [], seenEdge = new Set(), droppedEdges = 0, eseq = 0;
+    (Array.isArray(raw.edges) ? raw.edges : []).forEach(function (e) {
+      if (!e || typeof e !== 'object') { droppedEdges++; return; }
+      var from = idMap.get(String(e.from != null ? e.from : e.source));
+      var to = idMap.get(String(e.to != null ? e.to : e.target));
+      var kind = lookup(EDGE_ALIASES, e.type != null ? e.type : e.kind, null);
+      if (!kind) { kind = DEFAULT_EDGE_TYPE; if (e.type != null || e.kind != null) badEnum++; }
+      var key = from + '>' + to + '>' + kind;
+      if (!from || !to || from === to || seenEdge.has(key)) { droppedEdges++; return; }
+      seenEdge.add(key);
+      edgeList.push({ id: 'e' + (++eseq), from: from, to: to, type: kind });
+    });
+
+    layoutMissing(list, edgeList);
+
+    if (dupIds) warnings.push(dupIds + ' duplicate id(s) renumbered');
+    if (badEnum) warnings.push(badEnum + ' unknown type/act value(s) defaulted');
+    if (badTime) warnings.push(badTime + ' invalid time(s) reset to 0:00');
+    if (droppedEdges) warnings.push(droppedEdges + ' invalid/duplicate edge(s) skipped');
+    return { state: { nodes: list, edges: edgeList }, warnings: warnings };
+  }
+
+  // Imported nodes without x/y get a left-to-right layered layout (longest path from the sources).
+  function layoutMissing(list, edgeList) {
+    var missing = list.filter(function (n) { return n.x === null || n.y === null; });
+    if (!missing.length) return;
+    if (missing.length < list.length) {              // a few unplaced nodes: park them in a row underneath
+      var placed = list.filter(function (n) { return n.x !== null && n.y !== null; });
+      var minX = Math.min.apply(null, placed.map(function (n) { return n.x; }));
+      var maxY = Math.max.apply(null, placed.map(function (n) { return n.y; })) + 170;
+      missing.forEach(function (n, i) { n.x = minX + i * 250; n.y = maxY; });
+      return;
+    }
+    var layer = {};
+    list.forEach(function (n) { layer[n.id] = 0; });
+    for (var pass = 0; pass < list.length; pass++) {
+      var changed = false;
+      edgeList.forEach(function (e) {
+        if (layer[e.from] + 1 < list.length && layer[e.to] < layer[e.from] + 1) { layer[e.to] = layer[e.from] + 1; changed = true; }
+      });
+      if (!changed) break;
+    }
+    var cols = {};
+    list.forEach(function (n) { (cols[layer[n.id]] = cols[layer[n.id]] || []).push(n); });
+    Object.keys(cols).forEach(function (c) {
+      cols[c].sort(function (a, b) { return (parseTime(a.time) || 0) - (parseTime(b.time) || 0); });
+      cols[c].forEach(function (n, i) { n.x = (+c) * 270; n.y = (i - (cols[c].length - 1) / 2) * 130; });
+    });
+  }
+
+  function maxSeq(items, prefix) {
+    var max = 0, re = new RegExp('^' + prefix + '(\\d+)$');
+    items.forEach(function (it) { var m = re.exec(it.id); if (m) max = Math.max(max, +m[1]); });
+    return max;
+  }
+
+  // Replace the whole map with `state` (output of serialize() / normalizeImport()).
+  function loadState(state, opts) {
+    setLinkMode(false);
+    network.unselectAll();
+    selSig = ''; dom.editPanel.hidden = true;
+    styleCache.clear();
+    nodes.clear(); edges.clear();
+    nodes.add(state.nodes.map(function (n) {
+      return { id: n.id, name: n.title, kind: n.type, act: n.act, time: n.time, text: n.text, x: n.x, y: n.y };
+    }));
+    edges.add(state.edges.map(function (e) { return { id: e.id, from: e.from, to: e.to, kind: e.type }; }));
+    nodeSeq = maxSeq(state.nodes, 'n');
+    edgeSeq = maxSeq(state.edges, 'e');
+    if (mode === 'sim') buildSimPanel();
+    restyleAll();
+    if (opts && opts.fit) fitView(false);
+    hideTip();
+  }
+
+  var saveTimer = null;
+  function saveNow() {
+    clearTimeout(saveTimer);
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(serialize())); } catch { /* storage unavailable: ignore */ }
+  }
+  function saveSoon() { clearTimeout(saveTimer); saveTimer = setTimeout(saveNow, 250); }
+  window.addEventListener('pagehide', saveNow);
+
+  function exportJSON() {
+    var blob = new Blob([JSON.stringify(serialize(), null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'clockrush-loop-map.json';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+  }
+
+  function importFile(file) {
+    file.text().then(function (text) {
+      var result = normalizeImport(JSON.parse(text));
+      var before = serialize();
+      loadState(result.state, { fit: true });
+      saveSoon();
+      var msg = 'Imported ' + result.state.nodes.length + ' nodes and ' + result.state.edges.length + ' edges.';
+      if (result.warnings.length) msg += ' (' + result.warnings.join('; ') + ')';
+      toast(msg, { action: { label: 'Undo', run: function () { loadState(before, { fit: true }); saveSoon(); } }, ms: 9000 });
+    }).catch(function (err) {
+      toast('Import failed: ' + (err && err.message ? err.message : err), { kind: 'error', ms: 7000 });
+    });
+  }
+
+  /* =====================================================================
+     SAMPLE MAP (shown the first time the page is opened)
+     ===================================================================== */
+  function sampleState() {
+    var N = function (id, title, type, act, time, text, x, y) { return { id: id, title: title, type: type, act: act, time: time, text: text, x: x, y: y }; };
+    var E = function (id, from, to, type) { return { id: id, from: from, to: to, type: type }; };
+    return {
+      nodes: [
+        N('n1', 'Wake Up at 6:00', 'Interaction', 'Act 1', '0:00', 'The wall clock reads 6:00 again. The boarding house is quiet. Nothing has changed since the last loop: the world is deterministic.', 0, 0),
+        N('n2', 'Overhear the Landlord', 'Knowledge Gain', 'Act 1', '0:30', 'Through the floorboards: "I hide the cellar key behind the pantry clock. Nobody would think to look there."', 270, -120),
+        N('n3', 'Search Behind the Pantry Clock', 'Interaction', 'Act 1', '1:15', 'Only works if you know where to look. Behind the clock face: a small brass key.', 540, -120),
+        N('n4', 'Brass Cellar Key', 'Permanent Unlock', 'Act 1', '1:20', 'You keep the key across loops, so you can carry it from the very first second next time.', 810, -120),
+        N('n5', 'Unlock the Cellar', 'Interaction', 'Act 2', '2:00', 'The key turns. Damp air, stacked crates, and a ledger lying open on a workbench.', 1080, -120),
+        N('n6', 'Read the Ledger', 'Knowledge Gain', 'Act 2', '2:30', 'Today\'s entry: the mayor\'s courier delivers the payment at exactly 5:45.', 1350, -120),
+        N('n7', 'Barter with the Tinker', 'Interaction', 'Act 2', '1:45', 'The tinker trades tools for gossip. Give him something good and he\'ll part with a crowbar.', 270, 120),
+        N('n8', 'Iron Crowbar', 'Permanent Unlock', 'Act 2', '3:00', 'A sturdy crowbar. It persists across loops.', 540, 120),
+        N('n9', 'Pry Open the Clocktower Door', 'Interaction', 'Act 3', '6:00', 'Needs the crowbar to force the door and the courier\'s schedule to time it right.', 1350, 20),
+        N('n10', 'Reach the Clock Face', 'Interaction', 'Act 3', '6:30', 'The hands are about to strike 7:00. Reach inside: is this how the loop breaks?', 1630, 20)
+      ],
+      edges: [
+        E('e1', 'n1', 'n2', 'Cause-Effect'), E('e2', 'n1', 'n7', 'Cause-Effect'),
+        E('e3', 'n2', 'n3', 'Knowledge Prerequisite'), E('e4', 'n2', 'n3', 'Cause-Effect'),
+        E('e5', 'n3', 'n4', 'Cause-Effect'), E('e6', 'n4', 'n5', 'Mechanical Prerequisite'),
+        E('e7', 'n5', 'n6', 'Cause-Effect'), E('e8', 'n7', 'n8', 'Cause-Effect'),
+        E('e9', 'n8', 'n9', 'Mechanical Prerequisite'), E('e10', 'n6', 'n9', 'Knowledge Prerequisite'),
+        E('e11', 'n9', 'n10', 'Cause-Effect')
+      ]
+    };
+  }
+
+  /* =====================================================================
+     EDIT MODE: right sidebar
+     ===================================================================== */
+  Object.keys(NODE_TYPES).forEach(function (k) { dom.fType.append(el('option', { value: k, text: k })); });
+  ACTS.forEach(function (a) { dom.fAct.append(el('option', { value: a, text: a })); });
+  Object.keys(EDGE_TYPES).forEach(function (k) { dom.eType.append(el('option', { value: k, text: k })); });
+
+  function selectedNode() { return selSig.slice(0, 2) === 'n:' ? nodes.get(selSig.slice(2)) : null; }
+  function selectedEdge() { return selSig.slice(0, 2) === 'e:' ? edges.get(selSig.slice(2)) : null; }
+
+  function syncSelection() {
+    var sig = '';
+    if (mode === 'edit' && !linking) {
+      var ns = network.getSelectedNodes(), es = network.getSelectedEdges();
+      if (ns.length === 1 && es.length === 0) sig = 'n:' + ns[0];
+      else if (es.length === 1 && ns.length === 0) sig = 'e:' + es[0];
+    }
+    if (sig === selSig) return;
+    selSig = sig;
+    var n = selectedNode(), e = selectedEdge();
+    var wasOpen = !dom.editPanel.hidden;
+    dom.nodeForm.hidden = !n;
+    dom.edgeForm.hidden = !e;
+    dom.editPanel.hidden = !(n || e);
+    if (!wasOpen && (n || e)) requestVisible(n ? [n.id] : [e.from, e.to], false);   // the canvas is about to get narrower
+    if (n) renderNodePanel(n);
+    if (e) renderEdgePanel(e);
+    hideTip();
+  }
+
+  function renderNodePanel(n) {
+    dom.fTitle.value = n.name;
+    dom.fType.value = n.kind;
+    dom.fAct.value = n.act;
+    dom.fTime.value = n.time;
+    dom.fText.value = n.text;
+    setTimeValid(true);
+    refreshNodeBadge(n.kind);
+  }
+  function refreshNodeBadge(kind) { dom.nodeBadge.replaceChildren(nodeSample(kind)); }
+
+  function setTimeValid(ok) {
+    dom.fTime.classList.toggle('invalid', !ok);
+    dom.fTimeHint.classList.toggle('bad', !ok);
+    dom.fTimeHint.textContent = ok
+      ? 'M:SS (max 7:00). Earliest moment in the loop this can happen. Blank = no requirement.'
+      : 'Use M:SS with two-digit seconds, e.g. 0:15 or 3:05.';
+  }
+
+  function patchSelectedNode(patch) {
+    var n = selectedNode();
+    if (!n) return;
+    nodes.update(Object.assign({ id: n.id }, patch));
+    restyleAll();
+    saveSoon();
+  }
+
+  dom.fTitle.addEventListener('input', function () { patchSelectedNode({ name: dom.fTitle.value }); });
+  dom.fText.addEventListener('input', function () { patchSelectedNode({ text: dom.fText.value }); });
+  dom.fAct.addEventListener('change', function () { patchSelectedNode({ act: dom.fAct.value }); });
+  dom.fType.addEventListener('change', function () {
+    patchSelectedNode({ kind: dom.fType.value });
+    refreshNodeBadge(dom.fType.value);
+  });
+  dom.fTime.addEventListener('input', function () {
+    var secs = parseTime(dom.fTime.value);
+    setTimeValid(secs !== null);
+    if (secs !== null) patchSelectedNode({ time: dom.fTime.value.trim() === '' ? '' : fmtTime(secs) });
+  });
+  dom.fTime.addEventListener('blur', function () {         // tidy up: "00:15" -> "0:15", discard invalid text
+    var n = selectedNode();
+    if (n) { dom.fTime.value = n.time; setTimeValid(true); }
+  });
+
+  function edgeWarning(e) {
+    var t = EDGE_TYPES[e.kind], src = nodes.get(e.from);
+    if (!t || !t.prereq || !src) return '';
+    if (src.kind === 'Interaction') {
+      return 'The source is an Interaction node, which has no “obtained” checkbox in Simulation Mode, so this prerequisite can never be met. Use a Knowledge Gain or Permanent Unlock node as the source.';
+    }
+    if (e.kind === 'Knowledge Prerequisite' && src.kind === 'Permanent Unlock') return 'Heads-up: Knowledge Prerequisites normally come from a Knowledge Gain node.';
+    if (e.kind === 'Mechanical Prerequisite' && src.kind === 'Knowledge Gain') return 'Heads-up: Mechanical Prerequisites normally come from a Permanent Unlock node.';
+    return '';
+  }
+
+  function renderEdgePanel(e) {
+    dom.eFrom.textContent = nodeName(nodes.get(e.from));
+    dom.eTo.textContent = nodeName(nodes.get(e.to));
+    dom.eType.value = e.kind;
+    refreshEdgeInfo(e);
+  }
+  function refreshEdgeInfo(e) {
+    dom.ePreview.replaceChildren(edgeSample(e.kind, 80), el('span', { text: e.kind }));
+    dom.eDesc.textContent = EDGE_TYPES[e.kind].desc;
+    var warn = edgeWarning(e);
+    dom.eWarn.hidden = !warn;
+    dom.eWarn.textContent = warn;
+  }
+
+  dom.eType.addEventListener('change', function () {
+    var e = selectedEdge();
+    if (!e) return;
+    edges.update({ id: e.id, kind: dom.eType.value });
+    restyleAll();
+    refreshEdgeInfo(edges.get(e.id));
+    saveSoon();
+  });
+  $('#btn-swap-edge').addEventListener('click', function () {
+    var e = selectedEdge();
+    if (!e) return;
+    edges.update({ id: e.id, from: e.to, to: e.from });
+    restyleAll();
+    renderEdgePanel(edges.get(e.id));
+    saveSoon();
+  });
+  $('#btn-del-node').addEventListener('click', function () { var n = selectedNode(); if (n) deleteItems([n.id], []); });
+  $('#btn-del-edge').addEventListener('click', function () { var e = selectedEdge(); if (e) deleteItems([], [e.id]); });
+  dom.nodeForm.addEventListener('submit', function (ev) { ev.preventDefault(); });
+  dom.edgeForm.addEventListener('submit', function (ev) { ev.preventDefault(); });
+
+  /* ----- adding / deleting ----- */
+  function freeSpotNearCentre() {
+    var c = network.getViewPosition();
+    var pts = Object.keys(network.getPositions()).map(function (id) { return network.getPositions([id])[id]; });
+    for (var k = 0; k < 400; k++) {
+      var ang = k * 2.4, r = 45 * Math.sqrt(k);
+      var x = c.x + r * Math.cos(ang), y = c.y + r * Math.sin(ang);
+      var clear = pts.every(function (p) { return Math.abs(p.x - x) > 240 || Math.abs(p.y - y) > 95; });
+      if (clear) return { x: Math.round(x), y: Math.round(y) };
+    }
+    return { x: Math.round(c.x), y: Math.round(c.y) };
+  }
+
+  function addNode() {
+    if (mode !== 'edit') return;
+    setLinkMode(false);
+    var p = freeSpotNearCentre();
+    var id = 'n' + (++nodeSeq);
+    nodes.add({ id: id, name: 'New Node', kind: DEFAULT_NODE_TYPE, act: 'Act 1', time: '', text: '', x: p.x, y: p.y });
+    restyleAll();
+    network.selectNodes([id]);
+    syncSelection();
+    dom.fTitle.focus();
+    dom.fTitle.select();
+    saveSoon();
+  }
+
+  function deleteItems(nodeIds, edgeIds) {
+    if (!nodeIds.length && !edgeIds.length) return;
+    var before = serialize();
+    var doomed = new Set(edgeIds);
+    edges.forEach(function (e) { if (nodeIds.indexOf(e.from) !== -1 || nodeIds.indexOf(e.to) !== -1) doomed.add(e.id); });
+    network.unselectAll();
+    edges.remove(Array.from(doomed));
+    nodes.remove(nodeIds);
+    nodeIds.forEach(function (id) { obtained.delete(id); styleCache.delete('n' + id); });
+    doomed.forEach(function (id) { styleCache.delete('e' + id); });
+    selSig = ''; syncSelection();
+    restyleAll();
+    hideTip();
+    saveSoon();
+    var msg = nodeIds.length
+      ? 'Deleted ' + nodeIds.length + (nodeIds.length === 1 ? ' node' : ' nodes') + (doomed.size ? ' and ' + doomed.size + (doomed.size === 1 ? ' edge.' : ' edges.') : '.')
+      : 'Deleted ' + doomed.size + (doomed.size === 1 ? ' edge.' : ' edges.');
+    toast(msg, { action: { label: 'Undo', run: function () { loadState(before); saveSoon(); } }, ms: 8000 });
+  }
+
+  function deleteSelection() {
+    if (mode !== 'edit') return;
+    deleteItems(network.getSelectedNodes(), network.getSelectedEdges());
+  }
+
+  function clearAll() {
+    if (mode !== 'edit' || !nodes.length) return;
+    deleteItems(nodes.getIds(), []);
+  }
+
+  /* ----- Add Edge: vis-network's built-in drag-to-connect mode ----- */
+  function setLinkMode(on) {
+    if (on === linking) return;
+    linking = on;
+    dom.btnAddEdge.setAttribute('aria-pressed', String(on));
+    dom.stage.classList.toggle('linking', on);
+    if (on) {
+      network.unselectAll();
+      syncSelection();
+      network.addEdgeMode();
+      toast('Drag from the source node to the target node. Press Esc to cancel.', { sticky: true, tag: 'link' });
+    } else {
+      network.disableEditMode();
+      if (toastTag === 'link') hideToast();
+    }
+  }
+
+  /* =====================================================================
+     SIMULATION MODE: left sidebar
+     ===================================================================== */
+  function buildSimPanel() {
+    var valid = new Set();
+    nodes.forEach(function (n) { if (n.kind === 'Knowledge Gain' || n.kind === 'Permanent Unlock') valid.add(n.id); });
+    Array.from(obtained).forEach(function (id) { if (!valid.has(id)) obtained.delete(id); });
+
+    GROUPS.forEach(function (g) {
+      var ul = document.getElementById(g.listId);
+      ul.replaceChildren();
+      var items = nodes.get({ filter: function (n) { return n.kind === g.kind; } });
+      items.sort(function (a, b) {
+        return ((parseTime(a.time) || 0) - (parseTime(b.time) || 0)) || nodeName(a).localeCompare(nodeName(b));
+      });
+      if (!items.length) { ul.append(el('li', { class: 'empty-list', text: g.empty })); return; }
+      items.forEach(function (n) {
+        var box = el('input', { type: 'checkbox', dataset: { id: n.id } });
+        box.checked = obtained.has(n.id);
+        ul.append(el('li', {},
+          el('label', { class: 'chk' }, box,
+            el('span', { class: 'chk-name', text: nodeName(n) }),
+            el('span', { class: 'chip', text: n.act }),
+            el('i', { class: 'dot', dataset: { id: n.id }, title: 'Glows when this node is currently available' }))));
+      });
+    });
+    dom.simTime.value = simTime;
+    dom.simTimeOut.textContent = fmtTime(simTime);
+  }
+
+  function updateSimStatus() {
+    var count = 0;
+    lastEval.forEach(function (ev) { if (ev.available) count++; });
+    dom.simSummary.textContent = 'Available now: ' + count + ' of ' + nodes.length + ' nodes';
+    dom.simPanel.querySelectorAll('.dot').forEach(function (d) {
+      var ev = lastEval.get(d.dataset.id);
+      d.classList.toggle('on', !!(ev && ev.available));
+    });
+  }
+
+  function syncChecks() {
+    dom.simPanel.querySelectorAll('input[type=checkbox]').forEach(function (b) { b.checked = obtained.has(b.dataset.id); });
+  }
+
+  dom.simPanel.addEventListener('change', function (ev) {
+    var box = ev.target;
+    if (!box.matches || !box.matches('input[type=checkbox]')) return;
+    if (box.checked) obtained.add(box.dataset.id); else obtained.delete(box.dataset.id);
+    restyleAll();
+  });
+  dom.simPanel.addEventListener('click', function (ev) {
+    var b = ev.target.closest && ev.target.closest('button[data-group]');
+    if (!b) return;
+    nodes.forEach(function (n) {
+      if (n.kind !== b.dataset.group) return;
+      if (b.dataset.all === '1') obtained.add(n.id); else obtained.delete(n.id);
+    });
+    syncChecks();
+    restyleAll();
+  });
+  dom.simTime.addEventListener('input', function () {
+    simTime = +dom.simTime.value;
+    dom.simTimeOut.textContent = fmtTime(simTime);
+    dom.simTime.setAttribute('aria-valuetext', fmtTime(simTime));
+    restyleAll();
+  });
+  dom.simReset.addEventListener('click', function () {
+    obtained.clear(); simTime = 0;
+    dom.simTime.value = 0; dom.simTimeOut.textContent = '0:00';
+    syncChecks();
+    restyleAll();
+  });
+
+  /* =====================================================================
+     MODE SWITCH
+     ===================================================================== */
+  function setMode(next) {
+    if (next === mode) return;
+    setLinkMode(false);
+    network.unselectAll();
+    mode = next;
+    document.body.dataset.mode = next;
+    var editing = next === 'edit';
+    network.setOptions({ interaction: { dragNodes: editing, selectable: editing, multiselect: editing } });
+    [dom.btnAddNode, dom.btnAddEdge, dom.btnImport, dom.btnClear].forEach(function (b) { b.disabled = !editing; });
+    dom.simPanel.hidden = editing;
+    selSig = ''; syncSelection();
+    requestVisible(nodes.getIds(), true);
+    dom.chip.textContent = editing ? 'EDIT MODE · drag nodes, click a node or arrow to edit it'
+                                   : 'SIMULATION · read-only, use the left panel';
+    if (!editing) buildSimPanel();
+    restyleAll();
+    hideTip();
+  }
+  document.querySelectorAll('input[name=mode]').forEach(function (r) {
+    r.addEventListener('change', function () { if (r.checked) setMode(r.value); });
+  });
+
+  /* =====================================================================
+     TOOLTIP, TOAST, LEGEND, VIEW
+     ===================================================================== */
+  var pointer = { x: 0, y: 0 };
+  dom.stage.addEventListener('mousemove', function (ev) {
+    var r = dom.stage.getBoundingClientRect();
+    pointer.x = ev.clientX - r.left; pointer.y = ev.clientY - r.top;
+    if (!dom.tip.hidden) placeTip();
+  });
+
+  function placeTip() {
+    var w = dom.tip.offsetWidth, h = dom.tip.offsetHeight;
+    var x = pointer.x + 16, y = pointer.y + 18;
+    if (x + w > dom.stage.clientWidth - 8) x = pointer.x - w - 16;
+    if (y + h > dom.stage.clientHeight - 8) y = pointer.y - h - 12;
+    dom.tip.style.left = Math.max(8, x) + 'px';
+    dom.tip.style.top = Math.max(8, y) + 'px';
+  }
+
+  function showTip(id) {
+    var n = nodes.get(id);
+    if (!n) return;
+    var text = n.text.length > 260 ? n.text.slice(0, 260).trim() + '…' : n.text;
+    var meta = [n.kind, n.act, n.time ? 'from ' + n.time : 'no time requirement'].join(' · ');
+    var kids = [el('b', { text: nodeName(n) }), el('div', { class: 'meta', text: meta })];
+    if (text) kids.push(el('div', { class: 'body', text: text }));
+    var ev = mode === 'sim' ? lastEval.get(id) : null;
+    if (ev) {
+      var status = el('div', { class: 'status ' + (ev.available ? 'ok' : 'no'), text: ev.available ? 'Available now' : 'Locked' });
+      if (!ev.available) {
+        var ul = el('ul');
+        if (!ev.timeOk) ul.append(el('li', { text: 'Needs time ≥ ' + fmtTime(ev.need) + ' (now ' + fmtTime(simTime) + ')' }));
+        ev.missing.forEach(function (e) {
+          var src = nodes.get(e.from);
+          var what = e.kind === 'Knowledge Prerequisite' ? 'knowledge' : 'unlock';
+          ul.append(el('li', { text: 'Needs ' + what + ': ' + nodeName(src) + (src && src.kind === 'Interaction' ? ' (an Interaction, so it can’t be obtained)' : '') }));
+        });
+        status.append(ul);
+      }
+      kids.push(status);
+    }
+    dom.tip.replaceChildren.apply(dom.tip, kids);
+    dom.tip.hidden = false;
+    placeTip();
+  }
+  function hideTip() { dom.tip.hidden = true; }
+
+  var toastTimer = null, toastTag = '';
+  function toast(msg, opts) {
+    opts = opts || {};
+    dom.toast.replaceChildren(el('span', { text: msg }));
+    if (opts.action) {
+      dom.toast.append(el('button', { type: 'button', text: opts.action.label, onclick: function () { opts.action.run(); hideToast(); } }));
+    }
+    dom.toast.className = 'toast' + (opts.kind === 'error' ? ' error' : '');
+    dom.toast.hidden = false;
+    toastTag = opts.tag || '';
+    clearTimeout(toastTimer);
+    if (!opts.sticky) toastTimer = setTimeout(hideToast, opts.ms || 4200);
+  }
+  function hideToast() { clearTimeout(toastTimer); dom.toast.hidden = true; toastTag = ''; }
+
+  function buildLegend() {
+    var ul = $('#legend-list');
+    Object.keys(NODE_TYPES).forEach(function (k) { ul.append(el('li', {}, nodeSample(k), el('span', { text: k }))); });
+    ul.append(el('li', { class: 'rule' }));
+    Object.keys(EDGE_TYPES).forEach(function (k) { ul.append(el('li', {}, edgeSample(k, 40), el('span', { text: k }))); });
+    ul.append(el('li', { class: 'rule sim-only' }));
+    ul.append(el('li', { class: 'sim-only' }, el('i', { class: 'dot on' }), el('span', { text: 'Glowing = available now' })));
+    ul.append(el('li', { class: 'sim-only' }, el('i', { class: 'dot' }), el('span', { text: 'Faded = locked' })));
+  }
+
+  /* vis-network rescales the whole graph whenever its container is resized (e.g. a sidebar opens).
+     Undo that: keep zoom and on-screen position, then make sure what matters is still visible. */
+  var wantVisible = null;
+  function requestVisible(ids, fit) { wantVisible = { ids: ids, fit: fit, until: Date.now() + 800 }; }
+
+  function applyVisible(want) {
+    var W = dom.canvas.clientWidth, H = dom.canvas.clientHeight, margin = 24;
+    var boxes = want.ids.map(function (id) { return network.getBoundingBox(id); }).filter(Boolean);
+    var outside = boxes.some(function (b) {
+      var a = network.canvasToDOM({ x: b.left, y: b.top }), z = network.canvasToDOM({ x: b.right, y: b.bottom });
+      return a.x < margin || a.y < margin || z.x > W - margin || z.y > H - margin;
+    });
+    if (!outside) return;
+    if (want.fit) { fitView(true); return; }
+    var cx = 0, cy = 0;
+    boxes.forEach(function (b) { cx += (b.left + b.right) / 2; cy += (b.top + b.bottom) / 2; });
+    network.moveTo({ position: { x: cx / boxes.length, y: cy / boxes.length }, scale: network.getScale(),
+                     animation: { duration: 250, easingFunction: 'easeInOutQuad' } });
+  }
+
+  network.on('resize', function () {
+    // Fired before vis applies its own camera correction, so what we read here is the pre-resize camera.
+    var pos = network.getViewPosition(), scale = network.getScale();
+    Promise.resolve().then(function () {
+      network.moveTo({ position: pos, scale: scale, animation: false });
+      var want = wantVisible;
+      wantVisible = null;
+      if (want && Date.now() < want.until) applyVisible(want);
+    });
+  });
+
+  function fitView(animate) {
+    network.redraw();
+    network.fit({ maxZoomLevel: 1.1, animation: animate ? { duration: 350, easingFunction: 'easeInOutQuad' } : false });
+  }
+  function zoomBy(f) {
+    network.moveTo({ scale: network.getScale() * f, animation: { duration: 160, easingFunction: 'easeInOutQuad' } });
+  }
+
+  /* =====================================================================
+     EVENTS
+     ===================================================================== */
+  ['select', 'selectNode', 'selectEdge', 'deselectNode', 'deselectEdge', 'dragStart'].forEach(function (evt) {
+    network.on(evt, syncSelection);
+  });
+  network.on('dragStart', hideTip);
+  network.on('zoom', hideTip);
+  network.on('dragEnd', function () { network.storePositions(); saveSoon(); });
+  network.on('hoverNode', function (p) { if (!linking) showTip(p.node); });
+  network.on('blurNode', hideTip);
+
+  dom.btnAddNode.addEventListener('click', addNode);
+  dom.btnAddEdge.addEventListener('click', function () { if (mode === 'edit') setLinkMode(!linking); });
+  dom.btnExport.addEventListener('click', exportJSON);
+  dom.btnImport.addEventListener('click', function () { dom.fileImport.click(); });
+  dom.btnClear.addEventListener('click', clearAll);
+  dom.fileImport.addEventListener('change', function () {
+    var f = dom.fileImport.files[0];
+    dom.fileImport.value = '';
+    if (f) importFile(f);
+  });
+  $('#zoom-in').addEventListener('click', function () { zoomBy(1.25); });
+  $('#zoom-out').addEventListener('click', function () { zoomBy(0.8); });
+  $('#zoom-fit').addEventListener('click', function () { fitView(true); });
+
+  document.addEventListener('keydown', function (ev) {
+    var tag = ev.target && ev.target.tagName;
+    var typing = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (ev.target && ev.target.isContentEditable);
+    if (ev.key === 'Escape') {
+      if (linking) setLinkMode(false);
+      else if (mode === 'edit') { network.unselectAll(); syncSelection(); if (typing) ev.target.blur(); }
+    } else if ((ev.key === 'Delete' || ev.key === 'Backspace') && !typing && !ev.ctrlKey && !ev.metaKey) {
+      if (mode === 'edit' && !linking) { ev.preventDefault(); deleteSelection(); }
+    }
+  });
+
+  /* =====================================================================
+     START
+     ===================================================================== */
+  dom.simTime.max = MAX_TIME;
+  buildLegend();
+  dom.chip.textContent = 'EDIT MODE · drag nodes, click a node or arrow to edit it';
+
+  var initial = null;
+  try {
+    var saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) initial = normalizeImport(JSON.parse(saved)).state;
+  } catch { initial = null; }
+  loadState(initial || normalizeImport(sampleState()).state, { fit: true });
+
+  // Handy for poking at the data from the browser console.
+  window.ClockRushMap = { nodes: nodes, edges: edges, network: network, evaluate: evaluate, serialize: serialize };
+})();
+</script>
+</body>
+</html>
